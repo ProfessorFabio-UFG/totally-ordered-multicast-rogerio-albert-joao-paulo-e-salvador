@@ -154,10 +154,10 @@ while 1:
   print('Main Thread: Sent all handshakes. handShakeCount=', str(handShakeCount))
 
   while (handShakeCount < N):
-    pass  # find a better way to wait for the handshakes
+    time.sleep(0.1)
 
   # Send a sequence of data messages to all other processes 
-  for msgNumber in range(0, nMsgs):
+  for msgNumber in range(nMsgs):
     # Wait some random time between successive messages
     time.sleep(random.randrange(10,100)/1000)
     timestamp = send(sendSocket, (myself, msgNumber), (addrToSend, PEER_UDP_PORT))
@@ -165,6 +165,6 @@ while 1:
 
   # Tell all processes that I have no more messages to send
   for addrToSend in PEERS:
-    msg = (-1,-1)
-    msgPack = pickle.dumps(msg)
-    sendSocket.sendto(msgPack, (addrToSend,PEER_UDP_PORT))
+    stop_timestamp = send(sendSocket, (myself, -1), (addrToSend, PEER_UDP_PORT))
+    print(f'Stop broadcast sent, timestamp={stop_timestamp}')
+    msgHandler.join()
