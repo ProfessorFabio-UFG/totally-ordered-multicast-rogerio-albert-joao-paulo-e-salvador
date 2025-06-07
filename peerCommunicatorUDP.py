@@ -5,6 +5,7 @@ import random
 import time
 import pickle
 from requests import get
+from clock_middleware import send, receive, global_clock
 
 #handShakes = [] # not used; only if we need to check whose handshake is missing
 
@@ -73,30 +74,22 @@ class MsgHandler(threading.Thread):
     # Wait until handshakes are received from all other processes
     # (to make sure that all processes are synchronized before they start exchanging messages)
     while handShakeCount < N:
-      msgPack = self.sock.recv(1024)
-      msg = pickle.loads(msgPack)
-      #print ('########## unpickled msgPack: ', msg)
-      if msg[0] == 'READY':
-
-        # To do: send reply of handshake and wait for confirmation
-
-        handShakeCount = handShakeCount + 1
-        #handShakes[msg[1]] = 1
-        print('--- Handshake received: ', msg[1])
+      (msg_type, peer_id), addr, recv_timestamp = receive(self.sock)
+      handShakeCount += 1
+      print(f"--- Handshake from Peer{peer_id}; recv_timestamp={recv_timestamp}, clock={global_clock}")
 
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
 
     stopCount=0 
-    while True:                
-      msgPack = self.sock.recv(1024)   # receive data from client
-      msg = pickle.loads(msgPack)
-      if msg[0] == -1:   # count the 'stop' messages from the other processes
-        stopCount = stopCount + 1
+    while True:
+      (sender, msgNum), addr, recv_timestamp = receive(self.sock)
+      if msgNum == -1:
+        stopCount += 1
         if stopCount == N:
-          break  # stop loop when all other processes have finished
+          break
       else:
-        print('Message ' + str(msg[1]) + ' from process ' + str(msg[0]))
-        logList.append(msg)
+        print(f"[clock={global_clock}] Msg {msgNum} from Peer{sender}, recv_timestamp={recv_timestamp}")
+        logList.append((sender, msgNum, recv_timestamp))
         
     # Write log file
     logFile = open('logfile'+str(myself)+'.log', 'w')
@@ -154,10 +147,8 @@ while 1:
   # To do: Must continue sending until it gets a reply from each process
   #        Send confirmation of reply
   for addrToSend in PEERS:
-    print('Sending handshake to ', addrToSend)
-    msg = ('READY', myself)
-    msgPack = pickle.dumps(msg)
-    sendSocket.sendto(msgPack, (addrToSend,PEER_UDP_PORT))
+    timestamp = send(sendSocket, ('READY', myself), (addrToSend, PEER_UDP_PORT))
+    print(f"Handshake sent to {addrToSend}, timestamp={timestamp}")
     #data = recvSocket.recvfrom(128) # Handshadke confirmations have not yet been implemented
 
   print('Main Thread: Sent all handshakes. handShakeCount=', str(handShakeCount))
@@ -169,11 +160,8 @@ while 1:
   for msgNumber in range(0, nMsgs):
     # Wait some random time between successive messages
     time.sleep(random.randrange(10,100)/1000)
-    msg = (myself, msgNumber)
-    msgPack = pickle.dumps(msg)
-    for addrToSend in PEERS:
-      sendSocket.sendto(msgPack, (addrToSend,PEER_UDP_PORT))
-      print('Sent message ' + str(msgNumber))
+    timestamp = send(sendSocket, (myself, msgNumber), (addrToSend, PEER_UDP_PORT))
+    print(f"Sent msg {msgNumber}, timestamp={timestamp}")
 
   # Tell all processes that I have no more messages to send
   for addrToSend in PEERS:
