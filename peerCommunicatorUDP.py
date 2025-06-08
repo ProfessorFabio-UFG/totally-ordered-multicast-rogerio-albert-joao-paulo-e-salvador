@@ -5,13 +5,13 @@ import random
 import time
 import pickle
 from requests import get
-from clock_middleware import send, receive, global_clock
+import clock_middleware as cm
+from clock_middleware import send, receive
 
 #handShakes = [] # not used; only if we need to check whose handshake is missing
 
 # Counter to make sure we have received handshakes from all other processes
-handShakeCount = 0
-handshake_lock = threading.Lock()
+
 handshake_done = threading.Event()
 
 PEERS = []
@@ -68,8 +68,6 @@ class MsgHandler(threading.Thread):
   def run(self):
     print('Handler is ready. Waiting for the handshakes...')
     
-    #global handShakes
-    global handShakeCount
     
     logList = []
     count = 0
@@ -82,7 +80,7 @@ class MsgHandler(threading.Thread):
       if msg_type != 'READY':
         continue
       count += 1
-      print(f"--- Handshake from Peer{peer_id}; recv_timestamp={recv_timestamp}, clock={global_clock}")
+      print(f"--- Handshake from Peer{peer_id}; recv_timestamp={recv_timestamp}, clock={cm.global_clock}")
     
     handshake_done.set()
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
@@ -90,18 +88,20 @@ class MsgHandler(threading.Thread):
     stopCount=0 
     while True:
       (sender, msgNum), addr, recv_timestamp = receive(self.sock)
+      if sender == 'READY':
+        continue
       if msgNum == -1:
         stopCount += 1
         if stopCount == len(PEERS):
           break
       else:
-        print(f"[clock={global_clock}] Msg {msgNum} from Peer{sender}, recv_timestamp={recv_timestamp}")
+        print(f"[clock={cm.global_clock}] Msg {msgNum} from Peer{sender}, recv_timestamp={recv_timestamp}")
         logList.append((sender, msgNum, recv_timestamp))
         
     # Write log file
-    logFile = open('logfile'+str(myself)+'.log', 'w')
-    logFile.writelines(str(logList))
-    logFile.close()
+    log_path = os.path.join('/tmp', f'logfile{myself}.log')
+    with open(log_path, 'w') as lf:
+      lf.write(str(logList))
     
     # Send the list of messages to the server (using a TCP socket) for comparison
     print('Sending the list of messages to the server for comparison...')
