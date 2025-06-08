@@ -7,12 +7,13 @@ import pickle
 import os
 import clock_middleware as cm
 from clock_middleware import send, receive
+import tempfile
 
 # Field definitions
-HANDSHAKE='READY'
-DATA='DATA'
-PROPOSE='PROPOSE'
-FINAL='FINAL'
+HANDSHAKE = 'READY'
+DATA = 'DATA'
+PROPOSE = 'PROPOSE'
+FINAL = 'FINAL'
 
 # Synchronization
 handshake_done = threading.Event()
@@ -22,10 +23,10 @@ PEERS = []  # list of IP strings
 my_id = None
 nMsgs = None
 
-# Hold-back queue: store tuples (timestamp, sender_id, seq, payload_type)
+# Hold-back queue: store tuples (timestamp, sender_id, seq)
 from queue import PriorityQueue
 hold_back = PriorityQueue()
-# Collect proposals: proposals[seq] = list of proposed timestamps
+# Collect proposals: proposals[(sender, seq)] = list of proposed timestamps
 proposals = {}
 
 # UDP sockets
@@ -40,10 +41,21 @@ serverSock.listen(1)
 
 # Utility to write log
 def write_log(logList):
-    path = os.path.join('/tmp', f'logfile{my_id}.log')
+    path = os.path.join(tempfile.gettempdir(), f'logfile{my_id}.log')
     with open(path, 'w') as lf:
         lf.write(str(logList))
     print(f"Handler: log written to {path}")
+
+def getListOfPeers():
+    clientSock = socket(AF_INET, SOCK_STREAM)
+    clientSock.connect((GROUPMNGR_ADDR, GROUPMNGR_TCP_PORT))
+    req = {"op": "list"}
+    msg = pickle.dumps(req)
+    clientSock.send(msg)
+    msg = clientSock.recv(2048)
+    clientSock.close()
+    peerList = pickle.loads(msg)
+    return peerList
 
 class MsgHandler(threading.Thread):
     def __init__(self, sock):
@@ -65,51 +77,55 @@ class MsgHandler(threading.Thread):
 
         # 2) DATA/PROPOSE/FINAL loop
         delivered = []  # list of (sender, seq)
-        # track how many STOPs seen
         stopCount = 0
         while True:
             (msg_type, *fields), addr, ts = receive(self.sock)
             if msg_type == DATA:
                 sender, seq = fields
+                if seq == -1:
+                    stopCount += 1
+                    if stopCount == len(PEERS):
+                        break
+                    continue
                 # enqueue with initial timestamp
                 hold_back.put((ts, sender, seq))
                 # send proposal
                 prop_ts = cm.tick()
                 for peer in PEERS:
-                    send(sendSocket, (PROPOSE, seq, prop_ts, my_id), (peer, PEER_UDP_PORT))
+                    send(sendSocket, (PROPOSE, sender, seq, prop_ts, my_id), (peer, PEER_UDP_PORT))
             elif msg_type == PROPOSE:
-                seq, prop_ts, proposer = fields
-                proposals.setdefault(seq, []).append(prop_ts)
+                sender, seq, prop_ts, proposer = fields
+                key = (sender, seq)
+                proposals.setdefault(key, []).append(prop_ts)
                 # when all proposals collected, send final
-                if len(proposals[seq]) == len(PEERS):
-                    final_ts = max(proposals[seq])
+                if len(proposals[key]) == len(PEERS):
+                    final_ts = max(proposals[key])
                     cm.tick()
                     for peer in PEERS:
-                        send(sendSocket, (FINAL, seq, final_ts), (peer, PEER_UDP_PORT))
+                        send(sendSocket, (FINAL, sender, seq, final_ts), (peer, PEER_UDP_PORT))
             elif msg_type == FINAL:
-                seq, final_ts = fields
+                sender, seq, final_ts = fields
                 # locate and update in hold_back
                 temp = []
                 while not hold_back.empty():
                     item = hold_back.get()
-                    if item[2] == seq:
+                    if (item[1], item[2]) == (sender, seq):
                         # replace timestamp
                         temp.append((final_ts, item[1], item[2]))
                     else:
                         temp.append(item)
                 for it in temp:
                     hold_back.put(it)
-                # deliver any ready messages in order
+                # deliver messages in order of final timestamp if safe
                 while not hold_back.empty():
                     ts0, s0, seq0 = hold_back.queue[0]
-                    delivered.append((s0, seq0))
-                    hold_back.get()
-                    print(f"[DELIVER] Msg {seq0} from Peer{s0}, final_ts={ts0}")
-            # interpret STOP markers as FINAL for sequence -1
-            elif msg_type == DATA and fields[1] == -1:
-                stopCount += 1
-                if stopCount == len(PEERS):
-                    break
+                    # Only deliver if no message in queue has smaller timestamp
+                    if all(ts0 <= x[0] for x in list(hold_back.queue)):
+                        delivered.append((s0, seq0))
+                        hold_back.get()
+                        print(f"[DELIVER] Msg {seq0} from Peer{s0}, final_ts={ts0}")
+                    else:
+                        break
         # write and send log
         write_log(delivered)
         client = socket(AF_INET, SOCK_STREAM)
@@ -131,7 +147,7 @@ if __name__ == '__main__':
     # initial registration
     client = socket(AF_INET, SOCK_STREAM)
     client.connect((GROUPMNGR_ADDR, GROUPMNGR_TCP_PORT))
-    client.send(pickle.dumps({'op':'register','ipaddr':gethostname()}))
+    client.send(pickle.dumps({'op': 'register', 'ipaddr': gethostname()}))
     client.close()
 
     # wait for start
@@ -149,7 +165,7 @@ if __name__ == '__main__':
 
     # start handler
     handler = MsgHandler(recvSocket)
-    handler.start() 
+    handler.start()
 
     # handshake phase
     for peer in PEERS:
@@ -162,7 +178,7 @@ if __name__ == '__main__':
 
     # DATA send phase
     for seq in range(nMsgs):
-        time.sleep(random.uniform(0.01,0.1))
+        time.sleep(random.uniform(0.01, 0.1))
         ts = cm.tick()
         for peer in PEERS:
             send(sendSocket, (DATA, my_id, seq), (peer, PEER_UDP_PORT))
