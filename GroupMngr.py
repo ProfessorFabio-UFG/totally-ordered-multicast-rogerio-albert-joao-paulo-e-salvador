@@ -8,7 +8,7 @@ membership = []
 def serverLoop():
   serverSock = socket(AF_INET, SOCK_STREAM)
   serverSock.bind(('0.0.0.0', port))
-  serverSock.listen(6)
+  serverSock.listen(N)
   while(1):
     (conn, addr) = serverSock.accept()
     msgPack = conn.recv(2048)
