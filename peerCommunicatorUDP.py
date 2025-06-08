@@ -114,7 +114,7 @@ class MsgHandler(threading.Thread):
         msg_num, proposal_timestamp, proposer = fields
         proposals.setdefault(msg_num, []).append(proposal_timestamp)
 
-        if len(proposals[msg_num] == len(PEERS)):
+        if len(proposals[msg_num]) == len(PEERS):
           final_timestamp = max(proposals[msg_num])
           cm.tick()
           for peer_id in PEERS:
