@@ -12,6 +12,7 @@ from clock_middleware import send, receive, global_clock
 # Counter to make sure we have received handshakes from all other processes
 handShakeCount = 0
 handshake_lock = threading.Lock()
+handshake_done = threading.Event()
 
 PEERS = []
 
@@ -71,20 +72,19 @@ class MsgHandler(threading.Thread):
     global handShakeCount
     
     logList = []
-    
+    count = 0
     # Wait until handshakes are received from all other processes
     # (to make sure that all processes are synchronized before they start exchanging messages)
     
-    while handShakeCount < len(PEERS):
+    while count < len(PEERS):
       (msg_type, peer_id), addr, recv_timestamp = receive(self.sock)
 
       if msg_type != 'READY':
         continue
-
-      with handshake_lock:
-        handShakeCount += 1
+      count += 1
       print(f"--- Handshake from Peer{peer_id}; recv_timestamp={recv_timestamp}, clock={global_clock}")
-
+    
+    handshake_done.set()
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
 
     stopCount=0 
@@ -92,7 +92,7 @@ class MsgHandler(threading.Thread):
       (sender, msgNum), addr, recv_timestamp = receive(self.sock)
       if msgNum == -1:
         stopCount += 1
-        if stopCount == N:
+        if stopCount == len(PEERS):
           break
       else:
         print(f"[clock={global_clock}] Msg {msgNum} from Peer{sender}, recv_timestamp={recv_timestamp}")
@@ -110,9 +110,6 @@ class MsgHandler(threading.Thread):
     msgPack = pickle.dumps(logList)
     clientSock.send(msgPack)
     clientSock.close()
-    
-    # Reset the handshake counter
-    handShakeCount = 0
 
     exit(0)
 
@@ -143,11 +140,14 @@ while 1:
   # (fully started processes start sending data messages, which the others try to interpret as control messages) 
   time.sleep(5)
 
+  handshake_done.clear()
+  
   # Create receiving message handler
   msgHandler = MsgHandler(recvSocket)
   msgHandler.start()
   print('Handler started')
   time.sleep(1)
+
 
   PEERS = getListOfPeers()
   my_ip = gethostname()
@@ -161,14 +161,8 @@ while 1:
     print(f"Handshake sent to {addrToSend}, timestamp={timestamp}")
     #data = recvSocket.recvfrom(128) # Handshadke confirmations have not yet been implemented
 
-  print('Main Thread: Sent all handshakes. handShakeCount=', str(handShakeCount))
-
-  while 1:
-    with handshake_lock:
-      if handShakeCount >= len(PEERS):
-        break
-    time.sleep(0.01)
-
+  print('Main Thread: Sent all handshakes. handShakeCount=', len(PEERS))
+  handshake_done.wait()
   print('Main Thread: All handshakes received — proceeding to message phase.')
   # Send a sequence of data messages to all other processes 
   for msgNumber in range(nMsgs):
@@ -182,4 +176,5 @@ while 1:
   for addrToSend in PEERS:
     stop_timestamp = send(sendSocket, (myself, -1), (addrToSend, PEER_UDP_PORT))
     print(f'Stop broadcast sent, timestamp={stop_timestamp}')
-    msgHandler.join()
+  msgHandler.join()
+  
