@@ -69,10 +69,8 @@ def getListOfPeers():
   clientSock.close()
   return PEERS
 
-def write_log(logList):
-    path = os.path.join('/tmp', f'logfile{myself}.log')
-    with open(path, 'w') as lf:
-        lf.write(str(logList))
+
+  
 
 class MsgHandler(threading.Thread):
   def __init__(self, sock):
@@ -147,13 +145,15 @@ class MsgHandler(threading.Thread):
       
         
     # Write log file
-    write_log(delivered)
+    path = os.path.join('/tmp', f'logfile{myself}.log')
+    with open(path, 'w') as lf:
+      lf.write(str(delivered))
     
     # Send the list of messages to the server (using a TCP socket) for comparison
     print('Sending the list of messages to the server for comparison...')
     clientSock = socket(AF_INET, SOCK_STREAM)
     clientSock.connect((SERVER_ADDR, SERVER_PORT))
-    msgPack = pickle.dumps(logList)
+    msgPack = pickle.dumps(delivered)
     clientSock.send(msgPack)
     clientSock.close()
 
