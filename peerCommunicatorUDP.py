@@ -11,6 +11,7 @@ from clock_middleware import send, receive, global_clock
 
 # Counter to make sure we have received handshakes from all other processes
 handShakeCount = 0
+handshake_lock = threading.Lock()
 
 PEERS = []
 
@@ -73,9 +74,15 @@ class MsgHandler(threading.Thread):
     
     # Wait until handshakes are received from all other processes
     # (to make sure that all processes are synchronized before they start exchanging messages)
-    while handShakeCount < N:
+    
+    while handShakeCount < len(PEERS):
       (msg_type, peer_id), addr, recv_timestamp = receive(self.sock)
-      handShakeCount += 1
+
+      if msg_type != 'READY':
+        continue
+
+      with handshake_lock:
+        handShakeCount += 1
       print(f"--- Handshake from Peer{peer_id}; recv_timestamp={recv_timestamp}, clock={global_clock}")
 
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
@@ -140,8 +147,11 @@ while 1:
   msgHandler = MsgHandler(recvSocket)
   msgHandler.start()
   print('Handler started')
+  time.sleep(1)
 
   PEERS = getListOfPeers()
+  my_ip = gethostname()
+  PEERS = [ip for ip in PEERS if ip != my_ip]
   
   # Send handshakes
   # To do: Must continue sending until it gets a reply from each process
@@ -153,15 +163,20 @@ while 1:
 
   print('Main Thread: Sent all handshakes. handShakeCount=', str(handShakeCount))
 
-  while (handShakeCount < N):
-    time.sleep(0.1)
+  while 1:
+    with handshake_lock:
+      if handShakeCount >= len(PEERS):
+        break
+    time.sleep(0.01)
 
+  print('Main Thread: All handshakes received — proceeding to message phase.')
   # Send a sequence of data messages to all other processes 
   for msgNumber in range(nMsgs):
     # Wait some random time between successive messages
     time.sleep(random.randrange(10,100)/1000)
-    timestamp = send(sendSocket, (myself, msgNumber), (addrToSend, PEER_UDP_PORT))
-    print(f"Sent msg {msgNumber}, timestamp={timestamp}")
+    for addrToSend in PEERS:
+      timestamp = send(sendSocket, (myself, msgNumber), (addrToSend, PEER_UDP_PORT))
+      print(f"Sent msg {msgNumber}, timestamp={timestamp}")
 
   # Tell all processes that I have no more messages to send
   for addrToSend in PEERS:
