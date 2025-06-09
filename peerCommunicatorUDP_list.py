@@ -8,6 +8,7 @@ import os
 import clock_middleware as cm
 from clock_middleware import send, receive
 import tempfile
+import requests
 
 # Field definitions
 HANDSHAKE = 'READY'
@@ -35,6 +36,18 @@ recvSocket = socket(AF_INET, SOCK_DGRAM)
 recvSocket.bind(('0.0.0.0', PEER_UDP_PORT))
 
 # TCP socket for start signal
+def find_free_port(start_port=5679, max_tries=20):
+    for port in range(start_port, start_port + max_tries):
+        try:
+            s = socket(AF_INET, SOCK_STREAM)
+            s.bind(('0.0.0.0', port))
+            s.close()
+            return port
+        except OSError:
+            continue
+    raise RuntimeError("No free port found")
+
+PEER_TCP_PORT = find_free_port(PEER_TCP_PORT)
 serverSock = socket(AF_INET, SOCK_STREAM)
 serverSock.bind(('0.0.0.0', PEER_TCP_PORT))
 serverSock.listen(1)
@@ -45,6 +58,13 @@ def write_log(logList):
     with open(path, 'w') as lf:
         lf.write(str(logList))
     print(f"Handler: log written to {path}")
+
+def get_public_ip():
+    try:
+        return requests.get('https://api.ipify.org').text
+    except Exception:
+        # fallback: try to get local IP
+        return gethostbyname(gethostname())
 
 def getListOfPeers():
     clientSock = socket(AF_INET, SOCK_STREAM)
@@ -145,9 +165,11 @@ def waitToStart():
 
 if __name__ == '__main__':
     # initial registration
+    public_ip = get_public_ip()
     client = socket(AF_INET, SOCK_STREAM)
     client.connect((GROUPMNGR_ADDR, GROUPMNGR_TCP_PORT))
-    client.send(pickle.dumps({'op': 'register', 'ipaddr': gethostname()}))
+    # Envie também a porta TCP dinâmica para o GroupMngr
+    client.send(pickle.dumps({'op': 'register', 'ipaddr': public_ip, 'port': PEER_TCP_PORT}))
     client.close()
 
     # wait for start
@@ -157,7 +179,7 @@ if __name__ == '__main__':
 
     # get peers and drop self
     peers = getListOfPeers()
-    PEERS = [ip for ip in peers if ip != gethostname()]
+    PEERS = [ip for ip in peers if ip != public_ip]
     print('Peer list:', PEERS)
 
     # clear handshake event
