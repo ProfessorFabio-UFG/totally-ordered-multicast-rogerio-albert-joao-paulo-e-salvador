@@ -60,19 +60,13 @@ def waitForLogsAndCompare(N_MSGS):
 		msgs.append(pickle.loads(msgPack))
 		numPeers = numPeers + 1
 
-	lengths = [len(log) for log in msgs]
-	min_len = min(lengths)
-	if any(l != N_MSGS for l in lengths):
-		print("Warning: expected", N_MSGS, "messages but got lengths:", lengths)
-		print(f"Comparing only the first {min_len} messages per peer.")
-	
 	unordered = 0
-	peers = len(msgs)
+
 	# Compare the lists of messages
-	for j in range(min_len):
+	for j in range(0,N_MSGS-1):
 		firstMsg = msgs[0][j]
-		for i in range(1,peers):
-			if msgs[i][j] != firstMsg:
+		for i in range(1,N-1):
+			if firstMsg != msgs[i][j]:
 				unordered = unordered + 1
 				break
 	
