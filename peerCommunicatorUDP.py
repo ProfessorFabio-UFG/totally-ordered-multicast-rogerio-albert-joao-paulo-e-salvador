@@ -16,7 +16,6 @@ from clock_middleware import send, receive
 
 handshake_done = threading.Event()
 
-
 HANDSHAKE='READY'
 DATA='DATA'
 PROPOSE='PROPOSE'
@@ -85,12 +84,14 @@ class MsgHandler(threading.Thread):
     # (to make sure that all processes are synchronized before they start exchanging messages)
     
     while count < len(PEERS):
-      (msg_type, peer_id), addr, recv_timestamp = receive(self.sock)
+      payload, addr, recv_timestamp = receive(self.sock)
+
+      msg_type = payload[0]
 
       if msg_type != HANDSHAKE:
         continue
       count += 1
-      print(f"--- Handshake from Peer{peer_id}; recv_timestamp={recv_timestamp}, clock={cm.global_clock}")
+      print(f"--- Handshake from Peer{payload[1]}; recv_timestamp={recv_timestamp}, clock={cm.global_clock}")
     
     handshake_done.set()
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
@@ -138,7 +139,7 @@ class MsgHandler(threading.Thread):
           hold_back.get()
           print(f"[DELIVER] Msg {msg0} from Peer{peer}, clock={cm.global_clock}, final timestamp={timestamp0}")
 
-      elif msg_type == DATA and fields[1] == -1:
+      if msg_type == DATA and fields[1] == -1:
         stopCount += 1
         if stopCount == len(PEERS):
           break
@@ -187,6 +188,9 @@ while 1:
   time.sleep(5)
 
   handshake_done.clear()
+  PEERS = getListOfPeers()
+  my_ip = gethostname()
+  PEERS = [ip for ip in PEERS if ip != my_ip]
   
   # Create receiving message handler
   msgHandler = MsgHandler(recvSocket)
@@ -195,9 +199,6 @@ while 1:
   time.sleep(1)
 
 
-  PEERS = getListOfPeers()
-  my_ip = gethostname()
-  PEERS = [ip for ip in PEERS if ip != my_ip]
   
   # Send handshakes
   # To do: Must continue sending until it gets a reply from each process
