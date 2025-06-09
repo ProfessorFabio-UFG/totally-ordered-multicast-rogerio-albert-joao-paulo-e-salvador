@@ -24,6 +24,7 @@ PEERS = []
 
 hold_back = PriorityQueue()
 proposals = {}
+delivered = []
 # UDP sockets to send and receive data messages:
 # Create send socket
 sendSocket = socket(AF_INET, SOCK_DGRAM)
@@ -96,7 +97,7 @@ class MsgHandler(threading.Thread):
     handshake_done.set()
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
 
-    delivered = []
+    
     stopCount=0 
     while True:
       (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
@@ -171,9 +172,16 @@ def waitToStart():
   conn.close()
   return (myself,nMsgs)
 
+def reset():
+  hold_back.queue.clear()
+  proposals.clear()
+  delivered.clear()
+  handshake_done.clear()
+  
 # From here, code is executed when program starts:
 registerWithGroupManager()
 while 1:
+  reset()
   print('Waiting for signal to start...')
   (myself, nMsgs) = waitToStart()
   print('I am up, and my ID is: ', str(myself))
@@ -187,7 +195,7 @@ while 1:
   # (fully started processes start sending data messages, which the others try to interpret as control messages) 
   time.sleep(5)
 
-  handshake_done.clear()
+  
   PEERS = getListOfPeers()
   my_ip = gethostname()
   PEERS = [ip for ip in PEERS if ip != my_ip]
