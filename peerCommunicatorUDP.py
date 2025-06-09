@@ -10,18 +10,18 @@ from requests import get
 import clock_middleware as cm
 from clock_middleware import send, receive
 
-#handShakes = [] # not used; only if we need to check whose handshake is missing
 
-# Counter to make sure we have received handshakes from all other processes
 
+# Threading event to avoid race conditions on handshake
 handshake_done = threading.Event()
 
+# message types
 HANDSHAKE='READY'
 DATA='DATA'
 PROPOSE='PROPOSE'
 FINAL='FINAL'
-PEERS = []
 
+PEERS = []
 hold_back = PriorityQueue()
 proposals = {}
 delivered = []
@@ -97,7 +97,7 @@ class MsgHandler(threading.Thread):
     handshake_done.set()
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
 
-    
+    # here is queue implementation
     stopCount=0 
     while True:
       (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
@@ -107,6 +107,7 @@ class MsgHandler(threading.Thread):
         hold_back.put((recv_timestamp, sender, msg_num))
 
         proposal_timestamp = cm.tick()
+        # send timestamp proposal
         for peer_id in PEERS:
           send(sendSocket, (PROPOSE, msg_num, proposal_timestamp, myself), (peer_id, PEER_UDP_PORT))
       
@@ -114,6 +115,7 @@ class MsgHandler(threading.Thread):
         msg_num, proposal_timestamp, proposer = fields
         proposals.setdefault(msg_num, []).append(proposal_timestamp)
 
+        # get veredict of proposals from all peers
         if len(proposals[msg_num]) == len(PEERS):
           final_timestamp = max(proposals[msg_num])
           cm.tick()
@@ -191,7 +193,6 @@ while 1:
     exit(0)
 
   # Wait for other processes to be ready
-  # To Do: fix bug that causes a failure when not all processes are started within this time
   # (fully started processes start sending data messages, which the others try to interpret as control messages) 
   time.sleep(5)
 
@@ -209,12 +210,11 @@ while 1:
 
   
   # Send handshakes
-  # To do: Must continue sending until it gets a reply from each process
-  #        Send confirmation of reply
+
   for addrToSend in PEERS:
     timestamp = send(sendSocket, ('READY', myself), (addrToSend, PEER_UDP_PORT))
     print(f"Handshake sent to {addrToSend}, timestamp={timestamp}")
-    #data = recvSocket.recvfrom(128) # Handshadke confirmations have not yet been implemented
+
 
   print('Main Thread: Sent all handshakes. handShakeCount=', len(PEERS))
   handshake_done.wait()
