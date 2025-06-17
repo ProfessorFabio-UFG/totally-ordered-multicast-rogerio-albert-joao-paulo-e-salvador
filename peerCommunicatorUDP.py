@@ -2,6 +2,7 @@ import os
 from socket  import *
 from constMP import * #-
 from queue import PriorityQueue
+from heapq import heapify
 import threading
 import random
 import time
@@ -25,6 +26,7 @@ PEERS = []
 hold_back = PriorityQueue()
 proposals = {}
 delivered = []
+finalized_messages = set()
 # UDP sockets to send and receive data messages:
 # Create send socket
 sendSocket = socket(AF_INET, SOCK_DGRAM)
@@ -124,23 +126,34 @@ class MsgHandler(threading.Thread):
 
       elif msg_type == FINAL:
         msg_num, final_timestamp = fields
-
-        temp = []
-        while not hold_back.empty():
-          item = hold_back.get()
-          if item[2] == msg_num:
-            temp.append((final_timestamp, item[1], item[2]))
-          else:
-            temp.append(item)
         
-        for it in temp:
-          hold_back.put(it)
+        original_sender = None
+        item_idx = -1
+
+        for i, item in enumerate(hold_back.queue):
+          if item[2] == msg_num:
+            original_sender = item[1]
+            item_idx = i
+            break
+
+        if item_idx != -1:
+          del hold_back.queue[item_idx] 
+          heapify(hold_back.queue)
+          
+          updated_item = (final_timestamp, original_sender, msg_num)
+          hold_back.put(updated_item)
+
+        finalized_messages.add(msg_num)
 
         while not hold_back.empty():
           timestamp0, peer, msg0 = hold_back.queue[0]
-          delivered.append((peer, msg0))
-          hold_back.get()
-          print(f"[DELIVER] Msg {msg0} from Peer{peer}, clock={cm.global_clock}, final timestamp={timestamp0}")
+
+          if msg0 in finalized_messages:
+            delivered_item = hold_back.get()
+            delivered.append((delivered_item[1], delivered_item[2]))
+            print(f"[DELIVER] Msg {msg0} from Peer{peer}, clock={cm.global_clock}, final ts={timestamp0}")
+          else:
+            break
 
       if msg_type == DATA and fields[1] == -1:
         stopCount += 1
@@ -179,6 +192,7 @@ def reset():
   proposals.clear()
   delivered.clear()
   handshake_done.clear()
+  finalized_messages.clear()
   
 # From here, code is executed when program starts:
 registerWithGroupManager()
