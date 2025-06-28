@@ -98,58 +98,75 @@ class MsgHandler(threading.Thread):
     print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
 
     # here is queue implementation
-    stopCount=0 
-    while True:
+    stopCount = 0 
+    while stopCount < len(PEERS):
       (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
       
       if msg_type == DATA:
         sender, msg_num = fields
-        # Não processa mensagens de parada (-1) no algoritmo de ordenação
+        
+        # Processar mensagem de parada
         if msg_num == -1:
+          stopCount += 1
+          print(f"[STOP] Recebido sinal de parada do Peer {sender}. Total: {stopCount}/{len(PEERS)}")
+          if stopCount >= len(PEERS):
+            print("[STOP] Todos os peers enviaram sinal de parada. Finalizando...")
+            break
           continue
           
+        # Processar mensagem normal
         hold_back.put((recv_timestamp, sender, msg_num))
-
         proposal_timestamp = cm.tick()
-        # send timestamp proposal
+        
+        # send timestamp proposal (usar chave única sender+msg_num)
+        key = (sender, msg_num)
         for peer_id in PEERS:
-          send(sendSocket, (PROPOSE, msg_num, proposal_timestamp, myself), (peer_id, PEER_UDP_PORT))
+          send(sendSocket, (PROPOSE, sender, msg_num, proposal_timestamp, myself), (peer_id, PEER_UDP_PORT))
       
       elif msg_type == PROPOSE:
-        msg_num, proposal_timestamp, proposer = fields
-        proposals.setdefault(msg_num, []).append(proposal_timestamp)
+        sender, msg_num, proposal_timestamp, proposer = fields
+        key = (sender, msg_num)
+        proposals.setdefault(key, []).append(proposal_timestamp)
 
         # get veredict of proposals from all peers
-        if len(proposals[msg_num]) == len(PEERS):
-          final_timestamp = max(proposals[msg_num])
+        if len(proposals[key]) == len(PEERS):
+          final_timestamp = max(proposals[key])
           cm.tick()
           for peer_id in PEERS:
-            send(sendSocket, (FINAL, msg_num, final_timestamp), (peer_id, PEER_UDP_PORT))
+            send(sendSocket, (FINAL, sender, msg_num, final_timestamp), (peer_id, PEER_UDP_PORT))
 
       elif msg_type == FINAL:
-        msg_num, final_timestamp = fields
+        sender, msg_num, final_timestamp = fields
 
+        # Buscar e atualizar a mensagem na hold_back queue
         temp = []
         while not hold_back.empty():
           item = hold_back.get()
-          if item[2] == msg_num:
-            temp.append((final_timestamp, item[1], item[2]))
+          if item[1] == sender and item[2] == msg_num:
+            temp.append((final_timestamp, sender, msg_num))
           else:
             temp.append(item)
         
+        # Recoloca tudo na fila
         for it in temp:
           hold_back.put(it)
 
+        # Entrega mensagens que estão prontas (apenas com menor timestamp)
         while not hold_back.empty():
           timestamp0, peer, msg0 = hold_back.queue[0]
-          delivered.append((peer, msg0))
-          hold_back.get()
-          print(f"[DELIVER] Msg {msg0} from Peer{peer}, clock={cm.global_clock}, final timestamp={timestamp0}")
-
-      if msg_type == DATA and fields[1] == -1:
-        stopCount += 1
-        if stopCount == len(PEERS):
-          break
+          # Só entrega se for o menor timestamp da fila
+          can_deliver = True
+          for item in hold_back.queue[1:]:
+            if item[0] < timestamp0:
+              can_deliver = False
+              break
+          
+          if can_deliver:
+            delivered.append((peer, msg0))
+            hold_back.get()
+            print(f"[DELIVER] Msg {msg0} from Peer{peer}, clock={cm.global_clock}, final timestamp={timestamp0}")
+          else:
+            break
       
         
     # Write log file
@@ -220,8 +237,10 @@ while 1:
 
   
   PEERS = getListOfPeers()
-  my_ip = gethostname()
+  my_ip = get_public_ip()  # Usar IP público em vez de hostname
   PEERS = [ip for ip in PEERS if ip != my_ip]
+  print(f"[PEER] Meu IP: {my_ip}")
+  print(f"[PEER] Lista de outros peers: {PEERS}")
   
   # Create receiving message handler
   msgHandler = MsgHandler(recvSocket)

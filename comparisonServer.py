@@ -45,17 +45,22 @@ def startPeers(peerList,nMsgs):
 	peerNumber = 0
 	for peer in peerList:
 		print(f"[SERVER] Iniciando Peer {peerNumber} ({peer})...")
-		clientSock = socket(AF_INET, SOCK_STREAM)
-		clientSock.connect((peer, PEER_TCP_PORT))
-		msg = (peerNumber,nMsgs)
-		msgPack = pickle.dumps(msg)
-		clientSock.send(msgPack)
-		msgPack = clientSock.recv(512)
-		response = pickle.loads(msgPack)
-		print(f"[SERVER] ✓ {response}")
-		clientSock.close()
-		peerNumber = peerNumber + 1
-	print(f"[SERVER] Todos os peers foram iniciados!")
+		try:
+			clientSock = socket(AF_INET, SOCK_STREAM)
+			clientSock.settimeout(10)  # 10 seconds timeout
+			clientSock.connect((peer, PEER_TCP_PORT))
+			msg = (peerNumber,nMsgs)
+			msgPack = pickle.dumps(msg)
+			clientSock.send(msgPack)
+			msgPack = clientSock.recv(512)
+			response = pickle.loads(msgPack)
+			print(f"[SERVER] ✓ {response}")
+			clientSock.close()
+			peerNumber = peerNumber + 1
+		except Exception as e:
+			print(f"[SERVER] ✗ Erro ao conectar com peer {peer}: {e}")
+			print(f"[SERVER] Peer {peer} pode estar offline ou travado")
+	print(f"[SERVER] Tentativa de iniciar todos os peers concluída!")
 	print("=" * 40)
 
 def waitForLogsAndCompare(N_MSGS):
@@ -65,29 +70,50 @@ def waitForLogsAndCompare(N_MSGS):
 	numPeers = 0
 	msgs = [] # each msg is a list of tuples (with the original messages received by the peer processes)
 
+	# Set timeout for socket to avoid waiting forever
+	serverSock.settimeout(60)  # 60 seconds timeout
+	
 	# Receive the logs of messages from the peer processes
 	while numPeers < N:
 		print(f"[SERVER] Aguardando log do peer {numPeers + 1}/{N}...")
-		(conn, addr) = serverSock.accept()
-		msgPack = conn.recv(32768)
-		received_log = pickle.loads(msgPack)
-		print(f"[SERVER] ✓ Log recebido do peer {numPeers + 1} ({addr[0]}): {len(received_log)} mensagens")
-		print(f"[SERVER] Conteúdo: {received_log}")
-		conn.close()
-		msgs.append(received_log)
-		numPeers = numPeers + 1
+		try:
+			(conn, addr) = serverSock.accept()
+			msgPack = conn.recv(32768)
+			received_log = pickle.loads(msgPack)
+			print(f"[SERVER] ✓ Log recebido do peer {numPeers + 1} ({addr[0]}): {len(received_log)} mensagens")
+			print(f"[SERVER] Conteúdo: {received_log}")
+			conn.close()
+			msgs.append(received_log)
+			numPeers = numPeers + 1
+		except timeout:
+			print(f"[SERVER] ⚠️ Timeout aguardando logs. Recebidos {numPeers}/{N} logs.")
+			break
+	
+	# Reset timeout
+	serverSock.settimeout(None)
 
 	print(f"\n========== COMPARANDO LOGS ==========")
-	print(f"Comparando {len(msgs)} logs com {N_MSGS} mensagens cada...")
+	total_expected_msgs = N_MSGS * len(msgs)  # Total de mensagens esperadas por peer
+	print(f"Comparando {len(msgs)} logs...")
+	print(f"Esperado: {total_expected_msgs} mensagens por peer ({N_MSGS} mensagens × {len(msgs)} peers)")
 	
 	# Mostrar todos os logs recebidos
 	for i, log in enumerate(msgs):
-		print(f"\nPeer {i}: {log}")
+		print(f"\nPeer {i}: {len(log)} mensagens")
+		print(f"Conteúdo: {log}")
 	
 	unordered = 0
 
+	# Verificar se todos os logs têm o mesmo tamanho
+	if len(msgs) > 0:
+		expected_length = len(msgs[0])
+		for i in range(1, len(msgs)):
+			if len(msgs[i]) != expected_length:
+				print(f"[ERRO] Peer {i} tem {len(msgs[i])} mensagens, esperado {expected_length}")
+
 	# Compare the lists of messages
-	for j in range(0, min(N_MSGS, len(msgs[0]) if msgs else 0)):
+	max_length = max(len(log) for log in msgs) if msgs else 0
+	for j in range(max_length):
 		firstMsg = msgs[0][j] if len(msgs[0]) > j else None
 		mismatch = False
 		for i in range(1, len(msgs)):
@@ -98,7 +124,7 @@ def waitForLogsAndCompare(N_MSGS):
 					print(f"[ERRO] Posição {j}: Peer0={firstMsg}, Peer{i}={msgs[i][j]}")
 					break
 			else:
-				print(f"[ERRO] Peer {i} tem menos mensagens que esperado")
+				print(f"[ERRO] Peer {i} tem menos mensagens que esperado na posição {j}")
 				mismatch = True
 				break
 		if mismatch:
