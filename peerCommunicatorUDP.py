@@ -69,24 +69,29 @@ class MsgHandler(threading.Thread):
         self.sock = sock
 
     def run(self):
-        print('[HANDLER] Pronto para processar todas as mensagens.')
+        print(f'[HANDLER {myself}] Pronto para processar todas as mensagens.')
         
         acks = {}
         received_handshakes = set()
 
         while len(delivered) < TOTAL_MESSAGES_IN_SCRIPT:
             try:
+                # LOG ADICIONADO: Informa que está aguardando no socket
+                # print(f"[HANDLER {myself}] Aguardando no socket...")
                 (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
+                # LOG ADICIONADO: Mostra exatamente o que foi recebido
+                print(f"[HANDLER {myself}] RAW_RECV: type={msg_type}, fields={fields}, from={addr}, ts={recv_timestamp}")
+
 
                 # --- Processamento de Handshake ---
                 if msg_type == HANDSHAKE:
                     sender_id = fields[0]
                     if sender_id not in received_handshakes:
                         received_handshakes.add(sender_id)
-                        print(f"[HANDLER] ✓ Handshake recebido do Peer {sender_id}. Total: {len(received_handshakes)}/{len(PEERS)}")
+                        print(f"[HANDLER {myself}] ✓ Handshake recebido do Peer {sender_id}. Total: {len(received_handshakes)}/{len(PEERS)}")
                     
                     if len(received_handshakes) == len(PEERS) and not handshake_done.is_set():
-                        print('[HANDLER] Todos os handshakes recebidos. Liberando a thread principal.')
+                        print(f'[HANDLER {myself}] Todos os handshakes recebidos. Liberando a thread principal.')
                         handshake_done.set()
                 
                 # --- Processamento de Mensagem de Dados ---
@@ -94,6 +99,7 @@ class MsgHandler(threading.Thread):
                     sender, msg_content = fields
                     msg_key = (recv_timestamp, sender)
                     if msg_key not in acks:
+                        print(f"[HANDLER {myself}] Processando DATA de {sender}: '{msg_content}'")
                         hold_back.put((recv_timestamp, sender, msg_content))
                         acks[msg_key] = {myself}
                         for peer_ip in PEERS:
@@ -102,11 +108,14 @@ class MsgHandler(threading.Thread):
                 # --- Processamento de ACK ---
                 elif msg_type == ACK:
                     sender_id, original_msg_key = fields
+                    print(f"[HANDLER {myself}] Processando ACK de {sender_id} para msg {original_msg_key}")
                     if original_msg_key in acks:
                         acks[original_msg_key].add(sender_id)
 
             except Exception as e:
                 print(f"[HANDLER ERROR] Erro ao processar mensagem recebida: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
 
             # --- Lógica de Entrega ---
@@ -123,12 +132,12 @@ class MsgHandler(threading.Thread):
                         with lock:
                             if (top_sender, top_content) not in delivered:
                                 delivered.append((top_sender, top_content))
-                                print(f"[DELIVER] Entregue: '{top_content}' (de Peer {top_sender}). Total: {len(delivered)}")
+                                print(f"->> [DELIVER {myself}] Entregue: '{top_content}' (de Peer {top_sender}). Total: {len(delivered)} <<--")
                         
                         del acks[top_key]
                         can_deliver = True # Tenta entregar a próxima mensagem da fila
 
-        print("[HANDLER] Todas as mensagens do roteiro foram entregues. Encerrando.")
+        print(f"[HANDLER {myself}] Todas as mensagens do roteiro foram entregues. Encerrando.")
         
         print(f"\n[LOG] Enviando log final para o servidor...")
         try:
@@ -150,6 +159,7 @@ def waitToStart():
     peer_id, mode = msg[0], msg[1]
     
     if mode == 0:
+        print(f"[PEER] Sinal de terminação recebido! Peer {peer_id} finalizando...")
         conn.send(pickle.dumps(f'Peer process {peer_id} terminating.'))
     else:
         conn.send(pickle.dumps('Peer process '+str(peer_id)+' started for script mode.'))
@@ -167,9 +177,10 @@ def main_script_logic():
     my_script_part = SCRIPT.get(myself, [])
     script_index = 0
     print(f"\n========== PEER {myself} EXECUTANDO ROTEIRO ==========")
-    while script_index < len(my_script_part):
+    while script_index < len(my_script_part) and len(delivered) < TOTAL_MESSAGES_IN_SCRIPT :
         message_to_send, wait_for_log_size = my_script_part[script_index]
         
+        current_log_size = 0
         with lock:
             current_log_size = len(delivered)
         
