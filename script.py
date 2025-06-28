@@ -13,19 +13,19 @@ entregues antes de enviar a 'mensagem_a_enviar'. Isso garante a ordem causal.
 SCRIPT = {
     0: [
         ("Ola Peers, como estao?", 0),
-        ("Tambem estou bem, gostaria de saber se voces estao ocupados hoje.", 2),
-        ("Preciso de ajuda com um trabalho da faculdade.", 4),
+        ("Tambem estou bem, gostaria de saber se voces estao ocupados hoje.", 3),
+        ("Preciso de ajuda com um trabalho da faculdade.", 5),
         ("Otimo, nos reunimos mais tarde entao, ate mais galera.", 7)
     ],
     1: [
         ("Estou bem, e voce?", 1),
-        ("Nao estou, por que?", 3),
+        ("Nao estou, por que?", 4),
         ("Eu ajudo!", 5),
         ("Ate.", 8)
     ],
     2: [
         ("Estou bem tambem.", 1),
-        ("Foi mal, nao vou poder ajudar, estou ocupado agora.", 4),
+        ("Foi mal, nao vou poder ajudar, estou ocupado agora.", 6),
         ("Ate.", 8)
     ]
 }
