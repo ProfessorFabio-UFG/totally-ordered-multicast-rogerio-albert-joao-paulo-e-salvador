@@ -6,8 +6,9 @@ import threading
 import time
 import pickle
 from requests import get
+# Modificado para importar as novas funções
 import clock_middleware as cm
-from clock_middleware import send, receive
+from clock_middleware import stamp_message, send_stamped, receive
 from script import SCRIPT, TOTAL_MESSAGES_IN_SCRIPT
 
 # Evento para sincronizar o início, como no seu código original
@@ -78,7 +79,6 @@ class MsgHandler(threading.Thread):
             try:
                 (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
 
-                # --- Processamento de Handshake ---
                 if msg_type == HANDSHAKE:
                     sender_id = fields[0]
                     if sender_id not in received_handshakes:
@@ -89,27 +89,25 @@ class MsgHandler(threading.Thread):
                         print(f'[HANDLER {myself}] Todos os handshakes recebidos. Liberando a thread principal.')
                         handshake_done.set()
                 
-                # --- Processamento de Mensagem de Dados ---
                 elif msg_type == DATA:
                     sender, msg_content = fields
                     msg_key = (recv_timestamp, sender)
                     if msg_key not in acks:
                         hold_back.put((recv_timestamp, sender, msg_content))
                         acks[msg_key] = {myself}
+                        # A resposta de ACK usa a nova função de envio do middleware
+                        stamped_ack = stamp_message((ACK, myself, msg_key))
                         for peer_ip in PEERS:
-                            send(sendSocket, (ACK, myself, msg_key), (peer_ip, PEER_UDP_PORT))
+                            send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
                 
-                # --- Processamento de ACK ---
                 elif msg_type == ACK:
                     sender_id, original_msg_key = fields
                     if original_msg_key in acks:
                         acks[original_msg_key].add(sender_id)
 
             except Exception as e:
-                # Se o socket fechar, o programa está terminando.
                 break
 
-            # --- Lógica de Entrega ---
             can_deliver = True
             while can_deliver:
                 can_deliver = False
@@ -118,7 +116,7 @@ class MsgHandler(threading.Thread):
                     top_key = (top_ts, top_sender)
                     
                     if top_key in acks and len(acks.get(top_key, set())) == len(PEERS):
-                        hold_back.get() # Remove da fila
+                        hold_back.get()
                         
                         with lock:
                             if (top_sender, top_content) not in delivered:
@@ -150,7 +148,6 @@ def waitToStart():
     peer_id, mode = msg[0], msg[1]
     
     if mode == 0:
-        print(f"[PEER] Sinal de terminação recebido! Peer {peer_id} finalizando...")
         conn.send(pickle.dumps(f'Peer process {peer_id} terminating.'))
     else:
         conn.send(pickle.dumps('Peer process '+str(peer_id)+' started for script mode.'))
@@ -169,7 +166,6 @@ def main_script_logic():
     script_index = 0
     print(f"\n========== PEER {myself} EXECUTANDO ROTEIRO ==========")
     while script_index < len(my_script_part):
-        # Condição de saída para encerrar se a thread handler já terminou
         if len(delivered) >= TOTAL_MESSAGES_IN_SCRIPT:
             break
             
@@ -181,8 +177,14 @@ def main_script_logic():
         
         if current_log_size >= wait_for_log_size:
             print(f"\n[SEND] Minha deixa! (log tem {current_log_size} msgs). Enviando: '{message_to_send}'")
+            
+            # CORREÇÃO CRÍTICA: A mensagem é carimbada UMA VEZ.
+            stamped_data_msg = stamp_message((DATA, myself, message_to_send))
+            
+            # O mesmo objeto de mensagem carimbada é enviado para todos.
             for addrToSend in PEERS:
-                send(sendSocket, (DATA, myself, message_to_send), (addrToSend, PEER_UDP_PORT))
+                send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))
+            
             script_index += 1
         time.sleep(0.2)
     print(f"[PEER {myself}] Roteiro finalizado. Aguardando a entrega de todas as mensagens...")
@@ -212,8 +214,9 @@ while True:
         time.sleep(2)
 
         print("[PEER] Enviando handshakes para todos...")
+        stamped_handshake = stamp_message((HANDSHAKE, myself))
         for peer_ip in PEERS:
-            send(sendSocket, (HANDSHAKE, myself), (peer_ip, PEER_UDP_PORT))
+            send_stamped(sendSocket, stamped_handshake, (peer_ip, PEER_UDP_PORT))
 
         print("[PEER] Aguardando todos os peers ficarem prontos...")
         handshake_done.wait(timeout=15)
