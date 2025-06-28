@@ -153,27 +153,43 @@ class MsgHandler(threading.Thread):
       
         
     # Write log file
+    print(f"\n========== GERAÇÃO DE LOG - PEER {myself} ==========")
+    print(f"[LOG] Peer {myself} finalizou. Total de mensagens entregues: {len(delivered)}")
+    print(f"[LOG] Sequência de entrega (peer, mensagem):")
+    for i, (peer, msg) in enumerate(delivered):
+      print(f"  {i+1:3d}. Peer{peer} -> Msg{msg}")
+    
     path = os.path.join('/tmp', f'logfile{myself}.log')
     with open(path, 'w') as lf:
       lf.write(str(delivered))
+    print(f"[LOG] Arquivo salvo em: {path}")
     
     # Send the list of messages to the server (using a TCP socket) for comparison
-    print('Sending the list of messages to the server for comparison...')
-    clientSock = socket(AF_INET, SOCK_STREAM)
-    clientSock.connect((SERVER_ADDR, SERVER_PORT))
-    msgPack = pickle.dumps(delivered)
-    clientSock.send(msgPack)
-    clientSock.close()
+    print(f"\n========== ENVIANDO LOG PARA O SERVIDOR ==========")
+    print(f"[LOG] Conectando ao servidor {SERVER_ADDR}:{SERVER_PORT}...")
+    try:
+      clientSock = socket(AF_INET, SOCK_STREAM)
+      clientSock.connect((SERVER_ADDR, SERVER_PORT))
+      msgPack = pickle.dumps(delivered)
+      clientSock.send(msgPack)
+      print(f"[LOG] ✓ Log enviado com sucesso! {len(delivered)} mensagens enviadas ao servidor")
+      print(f"[LOG] Dados enviados: {delivered}")
+      clientSock.close()
+    except Exception as e:
+      print(f"[LOG] ✗ Erro ao enviar log para o servidor: {e}")
+    print(f"========== PEER {myself} FINALIZADO ==========\n")
 
     exit(0)
 
 # Function to wait for start signal from comparison server:
 def waitToStart():
+  print("[PEER] Aguardando sinal de início do servidor...")
   (conn, addr) = serverSock.accept()
   msgPack = conn.recv(1024)
   msg = pickle.loads(msgPack)
   myself = msg[0]
   nMsgs = msg[1]
+  print(f"[PEER] Sinal recebido! Peer ID: {myself}, Mensagens: {nMsgs}")
   conn.send(pickle.dumps('Peer process '+str(myself)+' started.'))
   conn.close()
   return (myself,nMsgs)
@@ -190,7 +206,9 @@ while 1:
   reset()
   print('Waiting for signal to start...')
   (myself, nMsgs) = waitToStart()
-  print('I am up, and my ID is: ', str(myself))
+  print(f"\n========== PEER {myself} INICIANDO ==========")
+  print(f'I am up, and my ID is: {str(myself)}')
+  print(f'Vou enviar {nMsgs} mensagens para cada peer')
 
   if nMsgs == 0:
     print('Terminating.')
@@ -223,17 +241,25 @@ while 1:
   print('Main Thread: Sent all handshakes. handShakeCount=', len(PEERS))
   handshake_done.wait()
   print('Main Thread: All handshakes received — proceeding to message phase.')
+  print(f"\n========== PEER {myself} ENVIANDO MENSAGENS ==========")
+  print(f"Enviando {nMsgs} mensagens para {len(PEERS)} peers: {PEERS}")
+  
   # Send a sequence of data messages to all other processes 
   for msgNumber in range(nMsgs):
     # Wait some random time between successive messages
     time.sleep(random.randrange(10,100)/1000)
+    print(f"\n[SEND] Enviando mensagem {msgNumber + 1}/{nMsgs}...")
     for addrToSend in PEERS:
       timestamp = send(sendSocket, (DATA, myself, msgNumber), (addrToSend, PEER_UDP_PORT))
-      print(f"Sent DATA msg {msgNumber} to {addrToSend}, timestamp={timestamp}")
+      print(f"  → Peer {addrToSend}: Msg{msgNumber}, timestamp={timestamp}")
 
+  print(f"\n[SEND] Enviando sinal de STOP para todos os peers...")
   # Tell all processes that I have no more messages to send
   for addrToSend in PEERS:
     stop_timestamp = send(sendSocket, (DATA, myself, -1), (addrToSend, PEER_UDP_PORT))
-    print(f'Stop broadcast sent, timestamp={stop_timestamp}')
+    print(f"  → Stop para {addrToSend}, timestamp={stop_timestamp}")
+  
+  print(f"[SEND] Peer {myself} terminou de enviar. Aguardando finalização do handler...")
   msgHandler.join()
+  print(f"========== PEER {myself} FINALIZADO ==========\n")
   
