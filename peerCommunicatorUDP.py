@@ -6,12 +6,11 @@ import threading
 import time
 import pickle
 from requests import get
-# Modificado para importar as novas funções
 import clock_middleware as cm
 from clock_middleware import stamp_message, send_stamped, receive
 from script import SCRIPT, TOTAL_MESSAGES_IN_SCRIPT
 
-# Evento para sincronizar o início, como no seu código original
+# Evento para sincronizar o início
 handshake_done = threading.Event()
 # Tipos de mensagem
 HANDSHAKE = 'READY'
@@ -22,11 +21,11 @@ ACK = 'ACK'
 PEERS = []
 hold_back = PriorityQueue()
 delivered = []
-lock = threading.Lock() # Lock para proteger o acesso à lista 'delivered'
+lock = threading.Lock() 
 my_ip = None
-myself = -1 # ID deste peer
+myself = -1 
 
-# --- Sockets (sem alterações) ---
+# --- Sockets ---
 sendSocket = socket(AF_INET, SOCK_DGRAM)
 recvSocket = socket(AF_INET, SOCK_DGRAM)
 recvSocket.bind(('0.0.0.0', PEER_UDP_PORT))
@@ -34,34 +33,45 @@ serverSock = socket(AF_INET, SOCK_STREAM)
 serverSock.bind(('0.0.0.0', PEER_TCP_PORT))
 serverSock.listen(1)
 
-# --- Funções de Rede (sem alterações) ---
+# --- Funções de Rede ---
 def get_public_ip():
   if GROUPMNGR_ADDR == '127.0.0.1' or GROUPMNGR_ADDR == 'localhost':
       return '127.0.0.1'
-  ipAddr = get('https://api.ipify.org').content.decode('utf8')
-  return ipAddr
+  try:
+      ipAddr = get('https://api.ipify.org').content.decode('utf8')
+      return ipAddr
+  except Exception as e:
+      print(f"[ERROR] Não foi possível obter o IP público: {e}. Usando 127.0.0.1")
+      return '127.0.0.1'
 
 def registerWithGroupManager():
-  clientSock = socket(AF_INET, SOCK_STREAM)
-  clientSock.connect((GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
-  ipAddr = get_public_ip()
-  req = {"op":"register", "ipaddr":ipAddr, "port":PEER_UDP_PORT}
-  msg = pickle.dumps(req)
-  clientSock.send(msg)
-  clientSock.close()
-  print(f"Registrado com o gerenciador de grupo: {req}")
+  try:
+    with socket(AF_INET, SOCK_STREAM) as clientSock:
+      clientSock.connect((GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
+      ipAddr = get_public_ip()
+      req = {"op":"register", "ipaddr":ipAddr, "port":PEER_UDP_PORT}
+      msg = pickle.dumps(req)
+      clientSock.send(msg)
+      print(f"Registrado com o gerenciador de grupo: {req}")
+  except Exception as e:
+      print(f"ERRO FATAL ao registrar: {e}")
+      os._exit(1)
 
 def getListOfPeers():
   global PEERS
-  clientSock = socket(AF_INET, SOCK_STREAM)
-  clientSock.connect((GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
-  req = {"op":"list"}
-  msg = pickle.dumps(req)
-  clientSock.send(msg)
-  msg_recv = clientSock.recv(2048)
-  PEERS = pickle.loads(msg_recv)
-  clientSock.close()
-  return PEERS
+  try:
+    with socket(AF_INET, SOCK_STREAM) as clientSock:
+      clientSock.connect((GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
+      req = {"op":"list"}
+      msg = pickle.dumps(req)
+      clientSock.send(msg)
+      msg_recv = clientSock.recv(2048)
+      # CORREÇÃO CRÍTICA: A lista de peers deve sempre conter todos os IPs.
+      PEERS = pickle.loads(msg_recv)
+      return PEERS
+  except Exception as e:
+      print(f"ERRO FATAL ao obter lista de peers: {e}")
+      os._exit(1)
 
 # --- Lógica do Handler de Mensagens ---
 class MsgHandler(threading.Thread):
@@ -95,17 +105,16 @@ class MsgHandler(threading.Thread):
                     if msg_key not in acks:
                         hold_back.put((recv_timestamp, sender, msg_content))
                         acks[msg_key] = {myself}
-                        # A resposta de ACK usa a nova função de envio do middleware
-                        stamped_ack = stamp_message((ACK, myself, msg_key))
-                        for peer_ip in PEERS:
-                            send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
+                        stamped_ack = cm.stamp_message((ACK, myself, msg_key))
+                        for peer_ip in PEERS: # Envia ACK para todos, incluindo a si mesmo
+                            cm.send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
                 
                 elif msg_type == ACK:
                     sender_id, original_msg_key = fields
                     if original_msg_key in acks:
                         acks[original_msg_key].add(sender_id)
 
-            except Exception as e:
+            except Exception:
                 break
 
             can_deliver = True
@@ -139,7 +148,7 @@ class MsgHandler(threading.Thread):
         except Exception as e:
             print(f"[LOG] ✗ Erro ao enviar log para o servidor: {e}")
 
-# --- Funções de Controle (sem alterações) ---
+# --- Funções de Controle ---
 def waitToStart():
     print("[PEER] Aguardando sinal de início do servidor...")
     (conn, addr) = serverSock.accept()
@@ -177,13 +186,9 @@ def main_script_logic():
         
         if current_log_size >= wait_for_log_size:
             print(f"\n[SEND] Minha deixa! (log tem {current_log_size} msgs). Enviando: '{message_to_send}'")
-            
-            # CORREÇÃO CRÍTICA: A mensagem é carimbada UMA VEZ.
-            stamped_data_msg = stamp_message((DATA, myself, message_to_send))
-            
-            # O mesmo objeto de mensagem carimbada é enviado para todos.
-            for addrToSend in PEERS:
-                send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))
+            stamped_data_msg = cm.stamp_message((DATA, myself, message_to_send))
+            for addrToSend in PEERS: # Envia para todos na lista, incluindo a si mesmo.
+                cm.send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))
             
             script_index += 1
         time.sleep(0.2)
@@ -202,8 +207,8 @@ while True:
         print(f'[PEER {myself}] Terminando por ordem do servidor.')
         break
 
-    if mode == -1: # Modo Roteiro
-        PEERS = getListOfPeers()
+    if mode == -1:
+        PEERS = getListOfPeers() # A lista de PEERS agora é usada consistentemente
         my_ip = get_public_ip()
         print(f"[PEER] Meu ID: {myself}, Meu IP: {my_ip}, Lista de Peers: {PEERS}")
 
@@ -214,9 +219,9 @@ while True:
         time.sleep(2)
 
         print("[PEER] Enviando handshakes para todos...")
-        stamped_handshake = stamp_message((HANDSHAKE, myself))
+        stamped_handshake = cm.stamp_message((HANDSHAKE, myself))
         for peer_ip in PEERS:
-            send_stamped(sendSocket, stamped_handshake, (peer_ip, PEER_UDP_PORT))
+            cm.send_stamped(sendSocket, stamped_handshake, (peer_ip, PEER_UDP_PORT))
 
         print("[PEER] Aguardando todos os peers ficarem prontos...")
         handshake_done.wait(timeout=15)
