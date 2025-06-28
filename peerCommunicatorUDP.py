@@ -104,6 +104,10 @@ class MsgHandler(threading.Thread):
       
       if msg_type == DATA:
         sender, msg_num = fields
+        # Não processa mensagens de parada (-1) no algoritmo de ordenação
+        if msg_num == -1:
+          continue
+          
         hold_back.put((recv_timestamp, sender, msg_num))
 
         proposal_timestamp = cm.tick()
