@@ -212,7 +212,7 @@ while 1:
 
   
   PEERS = getListOfPeers()
-  my_ip = gethostname()
+  my_ip = get_public_ip()
   PEERS = [ip for ip in PEERS if ip != my_ip]
   
   # Create receiving message handler
