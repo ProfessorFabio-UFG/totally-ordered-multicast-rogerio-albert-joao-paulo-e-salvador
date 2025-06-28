@@ -206,8 +206,12 @@ def waitToStart():
   msg = pickle.loads(msgPack)
   myself = msg[0]
   nMsgs = msg[1]
-  print(f"[PEER] Sinal recebido! Peer ID: {myself}, Mensagens: {nMsgs}")
-  conn.send(pickle.dumps('Peer process '+str(myself)+' started.'))
+  if nMsgs == 0:
+    print(f"[PEER] Sinal de terminação recebido! Peer {myself} finalizando...")
+    conn.send(pickle.dumps(f'Peer process {myself} terminating.'))
+  else:
+    print(f"[PEER] Sinal recebido! Peer ID: {myself}, Mensagens: {nMsgs}")
+    conn.send(pickle.dumps('Peer process '+str(myself)+' started.'))
   conn.close()
   return (myself,nMsgs)
 
@@ -228,7 +232,8 @@ while 1:
   print(f'Vou enviar {nMsgs} mensagens para cada peer')
 
   if nMsgs == 0:
-    print('Terminating.')
+    print(f'[PEER] Peer {myself} terminando por ordem do servidor.')
+    print('========== PEER FINALIZADO PELO SERVIDOR ==========')
     exit(0)
 
   # Wait for other processes to be ready

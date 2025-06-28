@@ -10,11 +10,15 @@ serverSock.listen(N)
 
 def mainLoop():
 	cont = 1
+	peerList = []  # Variável para manter a lista de peers
 	print("========== SERVIDOR DE COMPARAÇÃO INICIADO ==========")
 	print(f"Escutando na porta {SERVER_PORT}...")
 	while 1:
 		nMsgs = promptUser()
 		if nMsgs == 0:
+			print("[SERVER] Enviando sinal de terminação para todos os peers...")
+			# Enviar sinal de parada para todos os peers
+			terminatePeers(peerList)
 			print("[SERVER] Finalizando servidor...")
 			break
 		print(f"\n[SERVER] Iniciando rodada {cont} com {nMsgs} mensagens por peer...")
@@ -30,7 +34,7 @@ def mainLoop():
 		print(f"[SERVER] Total de peers: {len(peerList)}")
 		startPeers(peerList,nMsgs)
 		print('Now, wait for the message logs from the communicating peers...')
-		waitForLogsAndCompare(nMsgs)
+		waitForLogsAndCompare(nMsgs, len(peerList))
 		cont += 1
 	serverSock.close()
 
@@ -63,10 +67,10 @@ def startPeers(peerList,nMsgs):
 	print(f"[SERVER] Tentativa de iniciar todos os peers concluída!")
 	print("=" * 40)
 
-def waitForLogsAndCompare(N_MSGS):
+def waitForLogsAndCompare(N_MSGS, actual_peer_count):
 	# Loop to wait for the message logs for comparison:
 	print(f"\n========== SERVIDOR AGUARDANDO LOGS ==========")
-	print(f"Esperando logs de {N} peers...")
+	print(f"Esperando logs de {actual_peer_count} peers...")
 	numPeers = 0
 	msgs = [] # each msg is a list of tuples (with the original messages received by the peer processes)
 
@@ -74,8 +78,8 @@ def waitForLogsAndCompare(N_MSGS):
 	serverSock.settimeout(60)  # 60 seconds timeout
 	
 	# Receive the logs of messages from the peer processes
-	while numPeers < N:
-		print(f"[SERVER] Aguardando log do peer {numPeers + 1}/{N}...")
+	while numPeers < actual_peer_count:
+		print(f"[SERVER] Aguardando log do peer {numPeers + 1}/{actual_peer_count}...")
 		try:
 			(conn, addr) = serverSock.accept()
 			msgPack = conn.recv(32768)
@@ -85,17 +89,17 @@ def waitForLogsAndCompare(N_MSGS):
 			conn.close()
 			msgs.append(received_log)
 			numPeers = numPeers + 1
-		except timeout:
-			print(f"[SERVER] ⚠️ Timeout aguardando logs. Recebidos {numPeers}/{N} logs.")
+		except socket.timeout:
+			print(f"[SERVER] ⚠️ Timeout aguardando logs. Recebidos {numPeers}/{actual_peer_count} logs.")
 			break
 	
 	# Reset timeout
 	serverSock.settimeout(None)
 
 	print(f"\n========== COMPARANDO LOGS ==========")
-	total_expected_msgs = N_MSGS * len(msgs)  # Total de mensagens esperadas por peer
+	expected_msgs_per_peer = N_MSGS * actual_peer_count  # Total de mensagens que cada peer deveria receber
 	print(f"Comparando {len(msgs)} logs...")
-	print(f"Esperado: {total_expected_msgs} mensagens por peer ({N_MSGS} mensagens × {len(msgs)} peers)")
+	print(f"Esperado: {expected_msgs_per_peer} mensagens por peer ({N_MSGS} mensagens × {actual_peer_count} peers)")
 	
 	# Mostrar todos os logs recebidos
 	for i, log in enumerate(msgs):
@@ -114,6 +118,8 @@ def waitForLogsAndCompare(N_MSGS):
 	# Compare the lists of messages
 	max_length = max(len(log) for log in msgs) if msgs else 0
 	for j in range(max_length):
+		if len(msgs) == 0:
+			break
 		firstMsg = msgs[0][j] if len(msgs[0]) > j else None
 		mismatch = False
 		for i in range(1, len(msgs)):
@@ -136,6 +142,24 @@ def waitForLogsAndCompare(N_MSGS):
 	else:
 		print(f"✗ FALHA: Encontrados {unordered} rounds de mensagens desordenadas")
 	print("=" * 50)
+
+
+def terminatePeers(peerList):
+	# Enviar sinal de terminação para todos os peers
+	for i, peer in enumerate(peerList):
+		try:
+			print(f"[SERVER] Enviando sinal de terminação para Peer {i} ({peer})...")
+			clientSock = socket(AF_INET, SOCK_STREAM)
+			clientSock.settimeout(5)  # 5 seconds timeout
+			clientSock.connect((peer, PEER_TCP_PORT))
+			msg = (i, 0)  # 0 mensagens = sinal de terminação
+			msgPack = pickle.dumps(msg)
+			clientSock.send(msgPack)
+			# Não aguarda resposta para terminação
+			clientSock.close()
+			print(f"[SERVER] ✓ Sinal de terminação enviado para Peer {i}")
+		except Exception as e:
+			print(f"[SERVER] ⚠️ Erro ao enviar terminação para {peer}: {e}")
 
 
 # Initiate server:
