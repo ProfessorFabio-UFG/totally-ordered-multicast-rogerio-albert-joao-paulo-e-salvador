@@ -62,7 +62,7 @@ def getListOfPeers():
   clientSock.close()
   return PEERS
 
-# --- Lógica do Handler de Mensagens (Refatorada) ---
+# --- Lógica do Handler de Mensagens ---
 class MsgHandler(threading.Thread):
     def __init__(self, sock):
         threading.Thread.__init__(self)
@@ -76,12 +76,7 @@ class MsgHandler(threading.Thread):
 
         while len(delivered) < TOTAL_MESSAGES_IN_SCRIPT:
             try:
-                # LOG ADICIONADO: Informa que está aguardando no socket
-                # print(f"[HANDLER {myself}] Aguardando no socket...")
                 (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
-                # LOG ADICIONADO: Mostra exatamente o que foi recebido
-                print(f"[HANDLER {myself}] RAW_RECV: type={msg_type}, fields={fields}, from={addr}, ts={recv_timestamp}")
-
 
                 # --- Processamento de Handshake ---
                 if msg_type == HANDSHAKE:
@@ -99,7 +94,6 @@ class MsgHandler(threading.Thread):
                     sender, msg_content = fields
                     msg_key = (recv_timestamp, sender)
                     if msg_key not in acks:
-                        print(f"[HANDLER {myself}] Processando DATA de {sender}: '{msg_content}'")
                         hold_back.put((recv_timestamp, sender, msg_content))
                         acks[msg_key] = {myself}
                         for peer_ip in PEERS:
@@ -108,15 +102,12 @@ class MsgHandler(threading.Thread):
                 # --- Processamento de ACK ---
                 elif msg_type == ACK:
                     sender_id, original_msg_key = fields
-                    print(f"[HANDLER {myself}] Processando ACK de {sender_id} para msg {original_msg_key}")
                     if original_msg_key in acks:
                         acks[original_msg_key].add(sender_id)
 
             except Exception as e:
-                print(f"[HANDLER ERROR] Erro ao processar mensagem recebida: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
+                # Se o socket fechar, o programa está terminando.
+                break
 
             # --- Lógica de Entrega ---
             can_deliver = True
@@ -126,7 +117,7 @@ class MsgHandler(threading.Thread):
                     top_ts, top_sender, top_content = hold_back.queue[0]
                     top_key = (top_ts, top_sender)
                     
-                    if top_key in acks and len(acks[top_key]) == len(PEERS):
+                    if top_key in acks and len(acks.get(top_key, set())) == len(PEERS):
                         hold_back.get() # Remove da fila
                         
                         with lock:
@@ -135,7 +126,7 @@ class MsgHandler(threading.Thread):
                                 print(f"->> [DELIVER {myself}] Entregue: '{top_content}' (de Peer {top_sender}). Total: {len(delivered)} <<--")
                         
                         del acks[top_key]
-                        can_deliver = True # Tenta entregar a próxima mensagem da fila
+                        can_deliver = True
 
         print(f"[HANDLER {myself}] Todas as mensagens do roteiro foram entregues. Encerrando.")
         
@@ -177,7 +168,11 @@ def main_script_logic():
     my_script_part = SCRIPT.get(myself, [])
     script_index = 0
     print(f"\n========== PEER {myself} EXECUTANDO ROTEIRO ==========")
-    while script_index < len(my_script_part) and len(delivered) < TOTAL_MESSAGES_IN_SCRIPT :
+    while script_index < len(my_script_part):
+        # Condição de saída para encerrar se a thread handler já terminou
+        if len(delivered) >= TOTAL_MESSAGES_IN_SCRIPT:
+            break
+            
         message_to_send, wait_for_log_size = my_script_part[script_index]
         
         current_log_size = 0
@@ -213,7 +208,6 @@ while True:
         msgHandler = MsgHandler(recvSocket)
         msgHandler.daemon = True
         msgHandler.start()
-        print('Handler de mensagens iniciado.')
         
         time.sleep(2)
 
