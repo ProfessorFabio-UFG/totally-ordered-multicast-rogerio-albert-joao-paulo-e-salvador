@@ -10,7 +10,7 @@ def serverLoop():
     membership = []  # Limpa a lista de peers a cada execução do servidor
     serverSock = socket(AF_INET, SOCK_STREAM)
     serverSock.bind(('0.0.0.0', port))
-    serverSock.listen(N)
+    serverSock.listen(PEER_QTD)
     while True:
         (conn, addr) = serverSock.accept()
         msgPack = conn.recv(2048)

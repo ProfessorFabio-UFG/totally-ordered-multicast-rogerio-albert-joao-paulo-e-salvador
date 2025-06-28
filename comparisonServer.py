@@ -6,7 +6,7 @@ import sys
 
 serverSock = socket(AF_INET, SOCK_STREAM)
 serverSock.bind(('0.0.0.0', SERVER_PORT))
-serverSock.listen(N)
+serverSock.listen(PEER_QTD)
 
 def mainLoop():
 	cont = 1
