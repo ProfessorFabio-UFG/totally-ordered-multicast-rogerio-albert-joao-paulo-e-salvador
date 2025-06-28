@@ -1,6 +1,6 @@
 import os
 from socket  import *
-from constMP import * #-
+from constMP import *  # Constantes do multicast protocol
 from queue import PriorityQueue
 import threading
 import random
@@ -12,10 +12,10 @@ from clock_middleware import send, receive
 
 
 
-# Threading event to avoid race conditions on handshake
+# Evento de threading para evitar condições de corrida no handshake
 handshake_done = threading.Event()
 
-# message types
+# Tipos de mensagem
 HANDSHAKE='READY'
 DATA='DATA'
 PROPOSE='PROPOSE'
@@ -26,14 +26,15 @@ hold_back = PriorityQueue()
 proposals = {}
 delivered = []
 nMsgs_global = 0  # Para rastrear número de mensagens esperadas
-# UDP sockets to send and receive data messages:
-# Create send socket
+my_ip = None  # IP público deste peer
+# Sockets UDP para enviar e receber mensagens de dados:
+# Criar socket de envio
 sendSocket = socket(AF_INET, SOCK_DGRAM)
-#Create and bind receive socket
+# Criar e vincular socket de recebimento
 recvSocket = socket(AF_INET, SOCK_DGRAM)
 recvSocket.bind(('0.0.0.0', PEER_UDP_PORT))
 
-# TCP socket to receive start signal from the comparison server:
+# Socket TCP para receber sinal de início do servidor de comparação:
 serverSock = socket(AF_INET, SOCK_STREAM)
 serverSock.bind(('0.0.0.0', PEER_TCP_PORT))
 serverSock.listen(1)
@@ -41,32 +42,32 @@ serverSock.listen(1)
 
 def get_public_ip():
   ipAddr = get('https://api.ipify.org').content.decode('utf8')
-  print('My public IP address is: {}'.format(ipAddr))
+  print('Meu endereço IP público é: {}'.format(ipAddr))
   return ipAddr
 
-# Function to register this peer with the group manager
+# Função para registrar este peer com o gerenciador de grupo
 def registerWithGroupManager():
   clientSock = socket(AF_INET, SOCK_STREAM)
-  print ('Connecting to group manager: ', (GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
+  print ('Conectando ao gerenciador de grupo: ', (GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
   clientSock.connect((GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
   ipAddr = get_public_ip()
   req = {"op":"register", "ipaddr":ipAddr, "port":PEER_UDP_PORT}
   msg = pickle.dumps(req)
-  print ('Registering with group manager: ', req)
+  print ('Registrando com o gerenciador de grupo: ', req)
   clientSock.send(msg)
   clientSock.close()
 
 def getListOfPeers():
   clientSock = socket(AF_INET, SOCK_STREAM)
-  print ('Connecting to group manager: ', (GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
+  print ('Conectando ao gerenciador de grupo: ', (GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
   clientSock.connect((GROUPMNGR_ADDR,GROUPMNGR_TCP_PORT))
   req = {"op":"list"}
   msg = pickle.dumps(req)
-  print ('Getting list of peers from group manager: ', req)
+  print ('Obtendo lista de peers do gerenciador de grupo: ', req)
   clientSock.send(msg)
   msg = clientSock.recv(2048)
   PEERS = pickle.loads(msg)
-  print ('Got list of peers: ', PEERS)
+  print ('Lista de peers obtida: ', PEERS)
   clientSock.close()
   return PEERS
 
@@ -79,11 +80,11 @@ class MsgHandler(threading.Thread):
     self.sock = sock
 
   def run(self):
-    print('Handler is ready. Waiting for the handshakes...')
+    print('Handler está pronto. Aguardando os handshakes...')
     
     count = 0
-    # Wait until handshakes are received from all other processes
-    # (to make sure that all processes are synchronized before they start exchanging messages)
+    # Aguardar até que handshakes sejam recebidos de todos os outros processos
+    # (para garantir que todos os processos estejam sincronizados antes de começarem a trocar mensagens)
     
     while count < len(PEERS):
       payload, addr, recv_timestamp = receive(self.sock)
@@ -93,16 +94,16 @@ class MsgHandler(threading.Thread):
       if msg_type != HANDSHAKE:
         continue
       count += 1
-      print(f"--- Handshake from Peer{payload[1]}; recv_timestamp={recv_timestamp}, clock={cm.global_clock}")
+      print(f"--- Handshake do Peer{payload[1]}; recv_timestamp={recv_timestamp}, clock={cm.global_clock}")
     
     handshake_done.set()
-    print('Secondary Thread: Received all handshakes. Entering the loop to receive messages.')
+    print('Thread Secundária: Recebidos todos os handshakes. Entrando no loop para receber mensagens.')
 
-    # here is queue implementation - Algoritmo de Multicast Totalmente Ordenado
+    # aqui está a implementação da fila - Algoritmo de Multicast Totalmente Ordenado
     stopCount = 0 
     pending_finals = {}  # Controla quais mensagens estão aguardando FINAL
     
-    while stopCount < len(PEERS):
+    while stopCount < len(PEERS) + 1:
       (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
       
       if msg_type == DATA:
@@ -111,8 +112,8 @@ class MsgHandler(threading.Thread):
         # Processar mensagem de parada
         if msg_num == -1:
           stopCount += 1
-          print(f"[STOP] Recebido sinal de parada do Peer {sender}. Total: {stopCount}/{len(PEERS)}")
-          if stopCount >= len(PEERS):
+          print(f"[STOP] Recebido sinal de parada do Peer {sender}. Total: {stopCount}/{len(PEERS) + 1}")
+          if stopCount >= len(PEERS) + 1:
             print("[STOP] Todos os peers enviaram sinal de parada. Finalizando...")
             break
           continue
@@ -126,8 +127,37 @@ class MsgHandler(threading.Thread):
         key = (sender, msg_num)
         pending_finals[key] = False  # Marca que está aguardando FINAL
         
+        # Adicionar proposta na lista
+        proposals.setdefault(key, []).append(proposal_timestamp)
+        
+        # Não enviar proposta para si mesmo
         for peer_id in PEERS:
-          send(sendSocket, (PROPOSE, sender, msg_num, proposal_timestamp, myself), (peer_id, PEER_UDP_PORT))
+          if peer_id != my_ip:
+            send(sendSocket, (PROPOSE, sender, msg_num, proposal_timestamp, myself), (peer_id, PEER_UDP_PORT))
+        print(f"[PROPOSE] Enviou proposta {proposal_timestamp} para Msg{msg_num} de Peer{sender}")
+        
+        # Se é nossa própria mensagem e já temos todas as propostas, enviar FINAL
+        if sender == myself and len(proposals[key]) == len(PEERS) + 1:
+          final_timestamp = max(proposals[key])
+          cm.update(final_timestamp)
+          pending_finals[key] = True  # Marcar como recebido
+          
+          # Atualizar timestamp na hold_back queue
+          temp = []
+          while not hold_back.empty():
+            item = hold_back.get()
+            if item[1] == sender and item[2] == msg_num:
+              temp.append((final_timestamp, sender, msg_num))
+            else:
+              temp.append(item)
+          for it in temp:
+            hold_back.put(it)
+          
+          # Enviar FINAL para outros peers
+          for peer_id in PEERS:
+            if peer_id != my_ip:
+              send(sendSocket, (FINAL, sender, msg_num, final_timestamp), (peer_id, PEER_UDP_PORT))
+          print(f"[FINAL] Enviou timestamp final {final_timestamp} para Msg{msg_num} própria")
         print(f"[PROPOSE] Enviou proposta {proposal_timestamp} para Msg{msg_num} de Peer{sender}")
       
       elif msg_type == PROPOSE:
@@ -135,15 +165,17 @@ class MsgHandler(threading.Thread):
         key = (sender, msg_num)
         proposals.setdefault(key, []).append(proposal_timestamp)
         
-        print(f"[PROPOSE] Recebido proposta {proposal_timestamp} de Peer{proposer} para Msg{msg_num} de Peer{sender} ({len(proposals[key])}/{len(PEERS)})")
+        print(f"[PROPOSE] Recebido proposta {proposal_timestamp} de Peer{proposer} para Msg{msg_num} de Peer{sender} ({len(proposals[key])}/{len(PEERS) + 1})")
 
-        # Quando todas as propostas chegaram, enviar timestamp final
-        if len(proposals[key]) == len(PEERS):
+        # Só processar FINAL se for de mensagem de OUTRO peer
+        if sender != myself and len(proposals[key]) == len(PEERS) + 1:
           final_timestamp = max(proposals[key])
           cm.update(final_timestamp)  # Atualiza relógio com timestamp final
           
+          # Não enviar FINAL para si mesmo
           for peer_id in PEERS:
-            send(sendSocket, (FINAL, sender, msg_num, final_timestamp), (peer_id, PEER_UDP_PORT))
+            if peer_id != my_ip:
+              send(sendSocket, (FINAL, sender, msg_num, final_timestamp), (peer_id, PEER_UDP_PORT))
           print(f"[FINAL] Enviou timestamp final {final_timestamp} para Msg{msg_num} de Peer{sender}")
 
       elif msg_type == FINAL:
@@ -165,55 +197,64 @@ class MsgHandler(threading.Thread):
         for it in temp:
           hold_back.put(it)
 
-        # ALGORITMO DE ENTREGA CORRETO
-        # Entrega mensagens em ordem de timestamp final
-        can_deliver = True
-        while can_deliver and not hold_back.empty():
-          can_deliver = False
-          
-          # Encontra mensagem com menor timestamp
-          min_timestamp = float('inf')
-          min_msg = None
-          
-          for item in hold_back.queue:
-            timestamp, peer, msg = item
-            msg_key = (peer, msg)
-            
-            # Só considera mensagens que já receberam FINAL
-            if msg_key in pending_finals and pending_finals[msg_key]:
-              if timestamp < min_timestamp:
-                min_timestamp = timestamp
-                min_msg = item
-          
-          # Se encontrou mensagem válida para entrega
-          if min_msg is not None:
-            timestamp, peer, msg = min_msg
-            
-            # Remove da hold_back queue
-            temp = []
-            while not hold_back.empty():
-              item = hold_back.get()
-              if item != min_msg:
-                temp.append(item)
-            
-            for it in temp:
-              hold_back.put(it)
-            
-            # Entrega a mensagem
-            delivered.append((peer, msg))
-            msg_key = (peer, msg)
-            del pending_finals[msg_key]  # Remove do controle
-            
-            print(f"[DELIVER] Msg {msg} from Peer{peer}, final_timestamp={timestamp}, total_delivered={len(delivered)}")
-            can_deliver = True
+        # NÃO ENTREGA AINDA - aguarda todos os peers enviarem STOP
+        print(f"[FINAL] Timestamp atualizado. Aguardando sinal de STOP de todos os peers...")
       
+    # ENTREGA TODAS AS MENSAGENS APÓS RECEBER TODOS OS SINAIS DE STOP
+    print(f"\n========== ENTREGANDO MENSAGENS ==========")
+    print(f"[DELIVER] Todos os peers enviaram STOP. Iniciando entrega ordenada...")
+    print(f"[DELIVER] Mensagens na hold_back queue: {hold_back.qsize()}")
+    print(f"[DELIVER] Mensagens com FINAL recebido: {len([k for k, v in pending_finals.items() if v])}")
+    
+    # ALGORITMO DE ENTREGA TOTALMENTE ORDENADA
+    can_deliver = True
+    while can_deliver and not hold_back.empty():
+      can_deliver = False
+      
+      # Encontra mensagem com menor timestamp final
+      min_timestamp = float('inf')
+      min_msg = None
+      
+      for item in hold_back.queue:
+        timestamp, peer, msg = item
+        msg_key = (peer, msg)
         
-    # Write log file
+        # Só considera mensagens que já receberam FINAL
+        if msg_key in pending_finals and pending_finals[msg_key]:
+          if timestamp < min_timestamp:
+            min_timestamp = timestamp
+            min_msg = item
+      
+      # Se encontrou mensagem válida para entrega
+      if min_msg is not None:
+        timestamp, peer, msg = min_msg
+        
+        # Remove da hold_back queue
+        temp = []
+        while not hold_back.empty():
+          item = hold_back.get()
+          if item != min_msg:
+            temp.append(item)
+        
+        for it in temp:
+          hold_back.put(it)
+        
+        # Entrega a mensagem
+        delivered.append((peer, msg))
+        msg_key = (peer, msg)
+        del pending_finals[msg_key]  # Remove do controle
+        
+        print(f"[DELIVER] Msg {msg} do Peer{peer}, final_timestamp={timestamp}, total_delivered={len(delivered)}")
+        can_deliver = True
+    
+    print(f"[DELIVER] Entrega concluída. Total entregue: {len(delivered)}")
+        
+    # Escrever arquivo de log
     print(f"\n========== GERAÇÃO DE LOG - PEER {myself} ==========")
     print(f"[LOG] Peer {myself} finalizou. Total de mensagens entregues: {len(delivered)}")
-    print(f"[LOG] Esperado: {len(PEERS)} peers × {nMsgs_global} mensagens = {len(PEERS) * nMsgs_global} mensagens")
+    print(f"[LOG] Esperado: {len(PEERS) + 1} peers × {nMsgs_global} mensagens = {(len(PEERS) + 1) * nMsgs_global} mensagens")
     
-    if len(delivered) != len(PEERS) * nMsgs_global:
+    if len(delivered) != (len(PEERS) + 1) * nMsgs_global:
       print(f"[AVISO] Número de mensagens entregues incorreto!")
       print(f"[DEBUG] Mensagens pendentes na hold_back queue: {hold_back.qsize()}")
       if not hold_back.empty():
@@ -230,7 +271,7 @@ class MsgHandler(threading.Thread):
       lf.write(str(delivered))
     print(f"[LOG] Arquivo salvo em: {path}")
     
-    # Send the list of messages to the server (using a TCP socket) for comparison
+    # Enviar a lista de mensagens para o servidor (usando socket TCP) para comparação
     print(f"\n========== ENVIANDO LOG PARA O SERVIDOR ==========")
     print(f"[LOG] Conectando ao servidor {SERVER_ADDR}:{SERVER_PORT}...")
     try:
@@ -247,7 +288,7 @@ class MsgHandler(threading.Thread):
 
     exit(0)
 
-# Function to wait for start signal from comparison server:
+# Função para aguardar sinal de início do servidor de comparação:
 def waitToStart():
   print("[PEER] Aguardando sinal de início do servidor...")
   (conn, addr) = serverSock.accept()
@@ -271,15 +312,19 @@ def reset():
   handshake_done.clear()
   cm.global_clock = 0  # Reset do relógio de Lamport
   
-# From here, code is executed when program starts:
+# ===================================================================
+# INÍCIO DA EXECUÇÃO PRINCIPAL
+# ===================================================================
+# A partir daqui, o código é executado quando o programa inicia:
+
 registerWithGroupManager()
 while 1:
   reset()
-  print('Waiting for signal to start...')
+  print('Aguardando sinal para iniciar...')
   (myself, nMsgs) = waitToStart()
   nMsgs_global = nMsgs  # Armazena globalmente para uso no log
   print(f"\n========== PEER {myself} INICIANDO ==========")
-  print(f'I am up, and my ID is: {str(myself)}')
+  print(f'Estou ativo, e meu ID é: {str(myself)}')
   print(f'Vou enviar {nMsgs} mensagens para cada peer')
 
   if nMsgs == 0:
@@ -287,49 +332,65 @@ while 1:
     print('========== PEER FINALIZADO PELO SERVIDOR ==========')
     exit(0)
 
-  # Wait for other processes to be ready
-  # (fully started processes start sending data messages, which the others try to interpret as control messages) 
+  # Aguardar que outros processos estejam prontos
+  # (processos totalmente iniciados começam a enviar mensagens de dados, que os outros tentam interpretar como mensagens de controle) 
   time.sleep(5)
 
   
   PEERS = getListOfPeers()
   my_ip = get_public_ip()  # Usar IP público em vez de hostname
+  globals()['my_ip'] = my_ip
   PEERS = [ip for ip in PEERS if ip != my_ip]
   print(f"[PEER] Meu IP: {my_ip}")
   print(f"[PEER] Lista de outros peers: {PEERS}")
   
-  # Create receiving message handler
+  # Criar handler de mensagens de recebimento
   msgHandler = MsgHandler(recvSocket)
   msgHandler.start()
-  print('Handler started')
+  print('Handler iniciado')
   time.sleep(1)
 
 
   
-  # Send handshakes
+  # Enviar handshakes
 
   for addrToSend in PEERS:
     timestamp = send(sendSocket, ('READY', myself), (addrToSend, PEER_UDP_PORT))
-    print(f"Handshake sent to {addrToSend}, timestamp={timestamp}")
+    print(f"Handshake enviado para {addrToSend}, timestamp={timestamp}")
 
 
-  print('Main Thread: Sent all handshakes. handShakeCount=', len(PEERS))
+  print('Thread Principal: Enviados todos os handshakes. handShakeCount=', len(PEERS))
   handshake_done.wait()
-  print('Main Thread: All handshakes received — proceeding to message phase.')
+  print('Thread Principal: Todos os handshakes recebidos — prosseguindo para a fase de mensagens.')
   print(f"\n========== PEER {myself} ENVIANDO MENSAGENS ==========")
   print(f"Enviando {nMsgs} mensagens para {len(PEERS)} peers: {PEERS}")
   
-  # Send a sequence of data messages to all other processes 
+  # Enviar uma sequência de mensagens de dados para todos os outros processos 
   for msgNumber in range(nMsgs):
-    # Wait some random time between successive messages
+    # Aguardar algum tempo aleatório entre mensagens sucessivas
     time.sleep(random.randrange(10,100)/1000)
     print(f"\n[SEND] Enviando mensagem {msgNumber + 1}/{nMsgs}...")
+    
+    # Processar própria mensagem localmente
+    # Simular recebimento da própria mensagem via UDP
+    own_timestamp = cm.tick()
+    own_message = (DATA, myself, msgNumber, own_timestamp)
+    sendSocket.sendto(pickle.dumps(own_message), ('127.0.0.1', PEER_UDP_PORT))
+    print(f"  → Auto-envio: Msg{msgNumber}, timestamp={own_timestamp}")
+    
     for addrToSend in PEERS:
       timestamp = send(sendSocket, (DATA, myself, msgNumber), (addrToSend, PEER_UDP_PORT))
       print(f"  → Peer {addrToSend}: Msg{msgNumber}, timestamp={timestamp}")
 
   print(f"\n[SEND] Enviando sinal de STOP para todos os peers...")
-  # Tell all processes that I have no more messages to send
+  
+  # Enviar STOP para si mesmo primeiro
+  stop_own_timestamp = cm.tick()
+  stop_own_message = (DATA, myself, -1, stop_own_timestamp)
+  sendSocket.sendto(pickle.dumps(stop_own_message), ('127.0.0.1', PEER_UDP_PORT))
+  print(f"  → Auto-stop: timestamp={stop_own_timestamp}")
+  
+  # Informar todos os processos que não tenho mais mensagens para enviar
   for addrToSend in PEERS:
     stop_timestamp = send(sendSocket, (DATA, myself, -1), (addrToSend, PEER_UDP_PORT))
     print(f"  → Stop para {addrToSend}, timestamp={stop_timestamp}")

@@ -9,7 +9,8 @@ Códigos foram pensando para rodar em instâncias AWS EC2 de regiões diferentes
 > Mude `constMP.py` para ajustar os endereços IP do servidor e do GroupManager.
 
 > Abra um terminal para `comparisonServer.py` e outro para `GroupMngr.py`.
+> Caso a maquina do servidor já esteja usando a porta, use o comando `sudo pkill -f python3`
 
-> Abra N terminais para N presente em `constMP` e execute `peerCommunicatorUDP` em cada um.
+> Abra PEER_QTD terminais para o número de peers definido em `constMP.py` e execute `peerCommunicatorUDP` em cada um.
 
 Por fim, digite quantas mensagens devem ser enviadas no processo no terminal do `comparisonServer.py`.
