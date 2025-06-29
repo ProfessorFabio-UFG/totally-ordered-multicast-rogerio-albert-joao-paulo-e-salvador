@@ -89,6 +89,8 @@ class MsgHandler(threading.Thread):
             try:
                 (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
 
+                print(f"[RECV-{myself}] De {addr}: {msg_type} - timestamp {recv_timestamp}") # TMP
+
                 if msg_type == HANDSHAKE:
                     sender_id = fields[0]
                     if sender_id not in received_handshakes:
@@ -102,9 +104,15 @@ class MsgHandler(threading.Thread):
                 elif msg_type == DATA:
                     sender, msg_content = fields
                     msg_key = (recv_timestamp, sender)
+
+                    print(f"[DATA-{myself}] Recebida: '{msg_content}' de Peer {sender}, ts={recv_timestamp}")
+
                     if msg_key not in acks:
                         hold_back.put((recv_timestamp, sender, msg_content))
                         acks[msg_key] = {myself}
+
+                        print(f"[ACK-{myself}] Enviando ACKs para msg {msg_key}") # TMP
+
                         stamped_ack = cm.stamp_message((ACK, myself, msg_key))
                         for peer_ip in PEERS: # Envia ACK para todos, incluindo a si mesmo
                             cm.send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
@@ -123,6 +131,9 @@ class MsgHandler(threading.Thread):
                 if not hold_back.empty():
                     top_ts, top_sender, top_content = hold_back.queue[0]
                     top_key = (top_ts, top_sender)
+
+                    ack_count = len(acks.get(top_key, set())) # TMP
+                    print(f"[CHECK-{myself}] Topo da fila: {top_key}, ACKs: {ack_count}/{len(PEERS)} - {acks.get(top_key, set())}") # TMP
                     
                     if top_key in acks and len(acks.get(top_key, set())) == len(PEERS):
                         hold_back.get()
@@ -186,6 +197,9 @@ def main_script_logic():
         
         if current_log_size >= wait_for_log_size:
             print(f"\n[SEND] Minha deixa! (log tem {current_log_size} msgs). Enviando: '{message_to_send}'")
+
+            print(f"[SEND-{myself}] Enviando para: {PEERS}")
+
             stamped_data_msg = cm.stamp_message((DATA, myself, message_to_send))
             for addrToSend in PEERS: # Envia para todos na lista, incluindo a si mesmo.
                 cm.send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))

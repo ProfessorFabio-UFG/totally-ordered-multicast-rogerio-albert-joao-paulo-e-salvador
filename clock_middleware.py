@@ -34,6 +34,7 @@ def send_stamped(sock, stamped_msg, addr):
     """
     try:
         sock.sendto(pickle.dumps(stamped_msg), addr)
+        print(f"[SEND] Para {addr}: {stamped_msg[0]} - timestamp {stamped_msg[-1]}") # TMP
     except Exception as e:
         print(f"[ERROR_SEND] Falha ao enviar para {addr}: {e}")
 
