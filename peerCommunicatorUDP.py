@@ -117,10 +117,23 @@ class MsgHandler(threading.Thread):
                         for peer_ip in PEERS: # Envia ACK para todos, incluindo a si mesmo
                             cm.send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
                 
+                # BEFORE TRY
+                # elif msg_type == ACK:
+                #     sender_id, original_msg_key = fields
+                #     if original_msg_key in acks:
+                #         acks[original_msg_key].add(sender_id)
+                # END BEFORE TRY
+                # TRY
+
                 elif msg_type == ACK:
                     sender_id, original_msg_key = fields
-                    if original_msg_key in acks:
-                        acks[original_msg_key].add(sender_id)
+                    
+                    # Criar entrada se não existir (ACK chegou antes da DATA)
+                    if original_msg_key not in acks:
+                        acks[original_msg_key] = set()
+                    
+                    acks[original_msg_key].add(sender_id)
+                # END TRY
 
             except Exception:
                 break

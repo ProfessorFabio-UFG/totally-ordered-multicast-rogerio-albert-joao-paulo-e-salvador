@@ -94,7 +94,8 @@ def waitForLogsAndCompare(actual_peer_count):
 			conn.close()
 			msgs.append(received_log)
 			numPeers = numPeers + 1
-		except socket.timeout:
+		# except socket.timeout:
+		except TimeoutError:
 			print(f"[SERVER] Timeout aguardando logs. Recebidos {numPeers}/{actual_peer_count} logs.")
 			break
 	
