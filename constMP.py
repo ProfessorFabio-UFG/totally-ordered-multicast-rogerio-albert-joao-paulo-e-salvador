@@ -1,6 +1,6 @@
 PEER_UDP_PORT = 6789
 PEER_TCP_PORT = 5679
-PEER_QTD = 5  # Número de peers no sistema 
+PEER_QTD = 3  # Número de peers no sistema 
 SERVER_ADDR ='13.220.130.39'
 SERVER_PORT = 5678
 GROUPMNGR_ADDR = '13.220.130.39'
