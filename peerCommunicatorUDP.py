@@ -105,6 +105,7 @@ class MsgHandler(threading.Thread):
                     sender, msg_content = fields
                     msg_key = (recv_timestamp, sender)
 
+                    print(f"[DATA-{myself}] Processando: key={msg_key}, já existe? {msg_key in acks}")
                     print(f"[DATA-{myself}] Recebida: '{msg_content}' de Peer {sender}, ts={recv_timestamp}")
 
                     if msg_key not in acks:
@@ -131,8 +132,10 @@ class MsgHandler(threading.Thread):
                     # Criar entrada se não existir (ACK chegou antes da DATA)
                     if original_msg_key not in acks:
                         acks[original_msg_key] = set()
+                        print(f"[ACK-{myself}] Criando entrada para {original_msg_key} (ACK chegou antes)")
                     
                     acks[original_msg_key].add(sender_id)
+                    print(f"[ACK-{myself}] ACK de Peer {sender_id} para {original_msg_key}. Total: {len(acks[original_msg_key])}")
                 # END TRY
 
             except Exception:
