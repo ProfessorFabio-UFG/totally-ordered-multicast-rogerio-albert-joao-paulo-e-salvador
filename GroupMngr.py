@@ -7,7 +7,7 @@ membership = []
 
 def serverLoop():
     global membership
-    membership = []  # Limpa a lista de peers a cada execução do servidor
+    membership = []
     serverSock = socket(AF_INET, SOCK_STREAM)
     serverSock.bind(('0.0.0.0', port))
     serverSock.listen(PEER_QTD)
@@ -17,13 +17,13 @@ def serverLoop():
         req = pickle.loads(msgPack)
         if req["op"] == "register":
             peer_ip = req["ipaddr"]
-            # Remove qualquer registro antigo desse IP (independente da porta)
+            # Remove qualquer registro antigo desse IP
             membership = [m for m in membership if m[0] != peer_ip]
             peer_tuple = (peer_ip, req.get("port", PEER_UDP_PORT))
             membership.append(peer_tuple)
             print('Registered peer: ', peer_tuple)
         elif req["op"] == "list":
-            # Return only the IPs for compatibility, but can be changed to (ip, port) if needed
+            # Return only the IPs for compatibility
             peer_ips = [m[0] for m in membership]
             print('List of peers sent to server: ', peer_ips)
             conn.send(pickle.dumps(peer_ips))

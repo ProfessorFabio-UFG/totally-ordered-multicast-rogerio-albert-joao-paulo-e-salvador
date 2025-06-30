@@ -12,12 +12,13 @@ from script import SCRIPT, TOTAL_MESSAGES_IN_SCRIPT
 
 # Evento para sincronizar o início
 handshake_done = threading.Event()
+
 # Tipos de mensagem
 HANDSHAKE = 'READY'
 DATA = 'DATA'
 ACK = 'ACK'
 
-# --- Variáveis Globais ---
+# Variáveis globais
 PEERS = []
 hold_back = PriorityQueue()
 delivered = []
@@ -25,7 +26,7 @@ lock = threading.Lock()
 my_ip = None
 myself = -1 
 
-# --- Sockets ---
+# Sockets
 sendSocket = socket(AF_INET, SOCK_DGRAM)
 recvSocket = socket(AF_INET, SOCK_DGRAM)
 recvSocket.bind(('0.0.0.0', PEER_UDP_PORT))
@@ -33,7 +34,7 @@ serverSock = socket(AF_INET, SOCK_STREAM)
 serverSock.bind(('0.0.0.0', PEER_TCP_PORT))
 serverSock.listen(1)
 
-# --- Funções de Rede ---
+# Funções de rede
 def get_public_ip():
   if GROUPMNGR_ADDR == '127.0.0.1' or GROUPMNGR_ADDR == 'localhost':
       return '127.0.0.1'
@@ -66,14 +67,13 @@ def getListOfPeers():
       msg = pickle.dumps(req)
       clientSock.send(msg)
       msg_recv = clientSock.recv(2048)
-      # CORREÇÃO CRÍTICA: A lista de peers deve sempre conter todos os IPs.
       PEERS = pickle.loads(msg_recv)
       return PEERS
   except Exception as e:
       print(f"ERRO FATAL ao obter lista de peers: {e}")
       os._exit(1)
 
-# --- Lógica do Handler de Mensagens ---
+# Handler de mensagens
 class MsgHandler(threading.Thread):
     def __init__(self, sock):
         threading.Thread.__init__(self)
@@ -170,7 +170,7 @@ class MsgHandler(threading.Thread):
         except Exception as e:
             print(f"[LOG] ✗ Erro ao enviar log para o servidor: {e}")
 
-# --- Funções de Controle ---
+# Funções de controle
 def waitToStart():
     print("[PEER] Aguardando sinal de início do servidor...")
     (conn, addr) = serverSock.accept()
@@ -214,12 +214,12 @@ def main_script_logic():
 
             stamped_data_msg = cm.stamp_message((DATA, myself, message_to_send))
             
-            # Enviar para outros peers (não para si mesmo)
+            # Enviar para outros peers
             for addrToSend in PEERS:
                 if addrToSend != my_ip:
                     cm.send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))
             
-            # Processar própria mensagem localmente (simular recebimento)
+            # Processar própria mensagem localmente
             print(f"[SEND-{myself}] Processando própria mensagem localmente")
             sendSocket.sendto(pickle.dumps(stamped_data_msg), ('127.0.0.1', PEER_UDP_PORT))
             
@@ -227,9 +227,7 @@ def main_script_logic():
         time.sleep(0.2)
     print(f"[PEER {myself}] Roteiro finalizado. Aguardando a entrega de todas as mensagens...")
 
-# ===================================================================
-# INÍCIO DA EXECUÇÃO PRINCIPAL
-# ===================================================================
+# Execução principal
 registerWithGroupManager()
 while True:
     reset()
@@ -241,7 +239,7 @@ while True:
         break
 
     if mode == -1:
-        PEERS = getListOfPeers() # A lista de PEERS agora é usada consistentemente
+        PEERS = getListOfPeers()
         my_ip = get_public_ip()
         print(f"[PEER] Meu ID: {myself}, Meu IP: {my_ip}, Lista de Peers: {PEERS}")
 
@@ -254,7 +252,7 @@ while True:
         print("[PEER] Enviando handshakes para outros peers...")
         stamped_handshake = cm.stamp_message((HANDSHAKE, myself))
         for peer_ip in PEERS:
-            if peer_ip != my_ip:  # NÃO enviar handshake para si mesmo
+            if peer_ip != my_ip:
                 cm.send_stamped(sendSocket, stamped_handshake, (peer_ip, PEER_UDP_PORT))
 
         print("[PEER] Aguardando todos os peers ficarem prontos...")
