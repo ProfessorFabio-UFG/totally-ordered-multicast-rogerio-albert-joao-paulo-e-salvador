@@ -89,15 +89,15 @@ class MsgHandler(threading.Thread):
             try:
                 (msg_type, *fields), addr, recv_timestamp = receive(self.sock)
 
-                print(f"[RECV-{myself}] De {addr}: {msg_type} - timestamp {recv_timestamp}") # TMP
+                print(f"[RECV-{myself}] De {addr}: {msg_type} - timestamp {recv_timestamp}")
 
                 if msg_type == HANDSHAKE:
                     sender_id = fields[0]
                     if sender_id not in received_handshakes:
                         received_handshakes.add(sender_id)
-                        print(f"[HANDLER {myself}] ✓ Handshake recebido do Peer {sender_id}. Total: {len(received_handshakes)}/{len(PEERS)}")
+                        print(f"[HANDLER {myself}] ✓ Handshake recebido do Peer {sender_id}. Total: {len(received_handshakes)}/{len(PEERS) - 1}")
                     
-                    if len(received_handshakes) == len(PEERS) and not handshake_done.is_set():
+                    if len(received_handshakes) == len(PEERS) - 1 and not handshake_done.is_set():
                         print(f'[HANDLER {myself}] Todos os handshakes recebidos. Liberando a thread principal.')
                         handshake_done.set()
                 
@@ -110,22 +110,16 @@ class MsgHandler(threading.Thread):
 
                     if msg_key not in acks:
                         hold_back.put((recv_timestamp, sender, msg_content))
-                        acks[msg_key] = {myself}
+                        acks[msg_key] = {myself}  # Auto-ACK
 
-                        print(f"[ACK-{myself}] Enviando ACKs para msg {msg_key}") # TMP
+                        print(f"[ACK-{myself}] Enviando ACKs para msg {msg_key}")
 
+                        # Enviar ACK apenas para outros peers (não para si mesmo)
                         stamped_ack = cm.stamp_message((ACK, myself, msg_key))
-                        for peer_ip in PEERS: # Envia ACK para todos, incluindo a si mesmo
-                            cm.send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
+                        for peer_ip in PEERS:
+                            if peer_ip != my_ip:
+                                cm.send_stamped(sendSocket, stamped_ack, (peer_ip, PEER_UDP_PORT))
                 
-                # BEFORE TRY
-                # elif msg_type == ACK:
-                #     sender_id, original_msg_key = fields
-                #     if original_msg_key in acks:
-                #         acks[original_msg_key].add(sender_id)
-                # END BEFORE TRY
-                # TRY
-
                 elif msg_type == ACK:
                     sender_id, original_msg_key = fields
                     
@@ -136,7 +130,6 @@ class MsgHandler(threading.Thread):
                     
                     acks[original_msg_key].add(sender_id)
                     print(f"[ACK-{myself}] ACK de Peer {sender_id} para {original_msg_key}. Total: {len(acks[original_msg_key])}")
-                # END TRY
 
             except Exception:
                 break
@@ -148,10 +141,12 @@ class MsgHandler(threading.Thread):
                     top_ts, top_sender, top_content = hold_back.queue[0]
                     top_key = (top_ts, top_sender)
 
-                    ack_count = len(acks.get(top_key, set())) # TMP
-                    print(f"[CHECK-{myself}] Topo da fila: {top_key}, ACKs: {ack_count}/{len(PEERS)} - {acks.get(top_key, set())}") # TMP
+                    # Calcular número esperado de ACKs: outros peers + nós mesmos
+                    expected_acks = len([p for p in PEERS if p != my_ip]) + 1
+                    ack_count = len(acks.get(top_key, set()))
+                    print(f"[CHECK-{myself}] Topo da fila: {top_key}, ACKs: {ack_count}/{expected_acks} - {acks.get(top_key, set())}")
                     
-                    if top_key in acks and len(acks.get(top_key, set())) == len(PEERS):
+                    if top_key in acks and len(acks.get(top_key, set())) == expected_acks:
                         hold_back.get()
                         
                         with lock:
@@ -214,11 +209,19 @@ def main_script_logic():
         if current_log_size >= wait_for_log_size:
             print(f"\n[SEND] Minha deixa! (log tem {current_log_size} msgs). Enviando: '{message_to_send}'")
 
-            print(f"[SEND-{myself}] Enviando para: {PEERS}")
+            others = [p for p in PEERS if p != my_ip]
+            print(f"[SEND-{myself}] Enviando para outros peers: {others}")
 
             stamped_data_msg = cm.stamp_message((DATA, myself, message_to_send))
-            for addrToSend in PEERS: # Envia para todos na lista, incluindo a si mesmo.
-                cm.send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))
+            
+            # Enviar para outros peers (não para si mesmo)
+            for addrToSend in PEERS:
+                if addrToSend != my_ip:
+                    cm.send_stamped(sendSocket, stamped_data_msg, (addrToSend, PEER_UDP_PORT))
+            
+            # Processar própria mensagem localmente (simular recebimento)
+            print(f"[SEND-{myself}] Processando própria mensagem localmente")
+            sendSocket.sendto(pickle.dumps(stamped_data_msg), ('127.0.0.1', PEER_UDP_PORT))
             
             script_index += 1
         time.sleep(0.2)
@@ -248,10 +251,11 @@ while True:
         
         time.sleep(2)
 
-        print("[PEER] Enviando handshakes para todos...")
+        print("[PEER] Enviando handshakes para outros peers...")
         stamped_handshake = cm.stamp_message((HANDSHAKE, myself))
         for peer_ip in PEERS:
-            cm.send_stamped(sendSocket, stamped_handshake, (peer_ip, PEER_UDP_PORT))
+            if peer_ip != my_ip:  # NÃO enviar handshake para si mesmo
+                cm.send_stamped(sendSocket, stamped_handshake, (peer_ip, PEER_UDP_PORT))
 
         print("[PEER] Aguardando todos os peers ficarem prontos...")
         handshake_done.wait(timeout=15)
